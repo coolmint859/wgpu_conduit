@@ -1,0 +1,387 @@
+use std::{hash::{DefaultHasher, Hash, Hasher}, num::NonZero};
+
+use async_store::HoldPolicy;
+use uuid::Uuid;
+
+use crate::gpu_state::*;
+
+/// The target ID for a bind group entry
+#[derive(Clone, Debug)]
+pub enum BindingTarget {
+    Buffer(BufferId),
+    Texture(TextureId),
+    Sampler(SamplerId),
+}
+
+/// Represents gpu resources that can be used in a bind group
+pub trait Bindable {
+    /// Get the resource binding as it's entire wgpu binding type
+    fn as_binding(&self) -> wgpu::BindingType;
+    /// Get the id of the target resource the binding refers to
+    fn target(&self) -> BindingTarget;
+    /// Get the shader stage visibility of the resource binding
+    fn visibility(&self) -> wgpu::ShaderStages;
+}
+
+#[derive(Clone, Debug)]
+pub struct GroupEntry {
+    pub target: BindingTarget,
+    pub slot: u32
+}
+
+/// A blueprint for constructing wgpu bind groups
+#[derive(Clone, Debug)]
+pub struct BindGroup {
+    pub(crate) label: String,
+    pub(crate) layout: BindGroupLayout,
+    pub(crate) bindings: Vec<GroupEntry>,
+    pub(crate) hold_policy: Option<HoldPolicy>
+}
+
+impl BindGroup {
+    pub fn new() -> Self {
+        Self {
+            label: "bind_group".to_string(),
+            layout: BindGroupLayout::new(),
+            bindings: Vec::new(),
+            hold_policy: None,
+        }
+    }
+
+    /// Set the label for gpu profiling of the resultant bind group
+    pub fn with_label(mut self, label: &str) -> Self {
+        self.label = label.to_string();
+        self
+    }
+
+    /// Set the hold policy for this bind group. This overrides the global policy.
+    pub fn with_hold_policy(mut self, policy: HoldPolicy) -> Self {
+        self.hold_policy = Some(policy);
+        self
+    }
+
+    /// Add an entry into the bind group
+    pub fn with_entry(mut self, entry: impl Bindable) -> Self {
+        self.add_entry(entry);
+        self
+    }
+
+    /// Add an entry into the bind group
+    pub fn add_entry(&mut self, entry: impl Bindable) {
+        let slot = self.bindings.len() as u32;
+        self.layout.add_entry(&entry);
+
+        self.bindings.push(GroupEntry { 
+            target: entry.target(),
+            slot
+        });
+    }
+}
+
+impl ResourceId for BindGroup {
+    type Id = BindGroupId;
+
+    fn create_id(&self) -> Self::Id {
+        BindGroupId(Uuid::new_v4())
+    }
+}
+
+/// A blueprint for constucting bind group layouts. Ids are generated for one based on it's contents.
+#[derive(Clone, Debug, Hash)]
+pub struct BindGroupLayout {
+    pub(crate) entries: Vec<wgpu::BindGroupLayoutEntry>
+}
+
+impl BindGroupLayout {
+    pub fn new() -> Self {
+        Self { entries: Vec::new() }
+    }
+
+    /// Add an entry into the bind group layout
+    pub fn with_entry(mut self, entry: &impl Bindable) -> Self {
+        self.add_entry(entry);
+        self
+    }
+
+    /// Add an entry into the bind group layout
+    pub fn add_entry(&mut self, entry: &impl Bindable) {
+        let slot = self.entries.len() as u32;
+
+        self.entries.push(wgpu::BindGroupLayoutEntry {
+            binding: slot,
+            visibility: entry.visibility(),
+            ty: entry.as_binding(),
+            count: None,
+        });
+    }
+}
+
+impl ResourceId for BindGroupLayout {
+    type Id = LayoutId;
+
+    fn create_id(&self) -> Self::Id {
+        let mut hasher = DefaultHasher::new();
+        self.hash(&mut hasher);
+        LayoutId(Uuid::from_u128(hasher.finish() as u128))
+    }
+}
+
+/// Options for configurating a storage texture binding
+/// 
+/// Default is `access=WriteOnly` and `fmt=Rgba16Float`
+#[derive(Debug, Clone, Copy)]
+pub struct TextureTypeStorage {
+    access: wgpu::StorageTextureAccess, 
+    fmt: wgpu::TextureFormat
+}
+
+impl TextureTypeStorage {
+    pub fn new(fmt: wgpu::TextureFormat) -> Self {
+        Self {
+            access: wgpu::StorageTextureAccess::WriteOnly,
+            fmt
+        }
+    }
+
+    /// Set the shader access for the texture to read only. 
+    /// 
+    /// Texture must be annotated with `read` (wgsl) or `read_only` (glsl) in the shader
+    pub fn read_only(mut self) -> Self {
+        self.access = wgpu::StorageTextureAccess::ReadOnly;
+        self
+    }
+
+    /// Set the shader access for the texture to read and write. 
+    /// 
+    /// Texture must be annotated with `read_write` in the shader.
+    pub fn read_write(mut self) -> Self {
+        self.access = wgpu::StorageTextureAccess::ReadWrite;
+        self
+    }
+
+    /// Set the shader access for the texture to atomic read write. 
+    /// 
+    /// Texture must be annotated with `read_write` in the shader.
+    pub fn atomic_rw(mut self) -> Self {
+        self.access = wgpu::StorageTextureAccess::Atomic;
+        self
+    }
+}
+
+impl Default for TextureTypeStorage {
+    fn default() -> Self {
+        Self {
+            access: wgpu::StorageTextureAccess::WriteOnly,
+            fmt: wgpu::TextureFormat::Rgba16Float
+        }
+    }
+}
+
+/// Options for configuring a sampled texture binding
+/// 
+/// Default is `filterable=false` and `multisampled=false`
+#[derive(Debug, Clone, Copy)]
+pub struct TextureTypeSampled {
+    pub filterable: bool, 
+    pub multisampled: bool,
+}
+
+impl TextureTypeSampled {
+    /// Allows textures to be filtered when sampled
+    pub fn filterable() -> Self {
+        Self { filterable: true, multisampled: false }
+    }
+
+    /// Allows textures to multisampled
+    pub fn with_multisampling(mut self) -> Self {
+        self.multisampled = true;
+        self
+    }
+}
+
+impl Default for TextureTypeSampled {
+    fn default() -> Self {
+        Self { filterable: false, multisampled: false }
+    }
+}
+
+/// Represents a texture binding in a bind group
+pub struct TextureBinding {
+    tex_id: TextureId,
+    ty: wgpu::BindingType,
+    visibility: wgpu::ShaderStages,
+    view_dimensions: wgpu::TextureViewDimension
+}
+
+impl TextureBinding {
+    pub fn new(target: TextureId, ty: wgpu::BindingType) -> Self {
+        Self {
+            tex_id: target,
+            ty,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            view_dimensions: wgpu::TextureViewDimension::D2
+        }
+    }
+
+    /// Create a new storage texture binding
+    pub fn as_storage(target: TextureId, options: TextureTypeStorage) -> Self {
+        let ty = wgpu::BindingType::StorageTexture { 
+            access: options.access,
+            format: options.fmt, 
+            view_dimension: wgpu::TextureViewDimension::D2
+        };
+
+        TextureBinding::new(target, ty)
+    }
+
+    /// Create a new sampled texture binding
+    pub fn as_sampled(target: TextureId, options: TextureTypeSampled) -> Self {
+        let ty = wgpu::BindingType::Texture { 
+            sample_type: wgpu::TextureSampleType::Float { filterable: options.filterable }, 
+            view_dimension: wgpu::TextureViewDimension::D2, 
+            multisampled: options.multisampled
+        };
+
+        TextureBinding::new(target, ty)
+    }
+
+    /// Set the view dimensions for the texture binding
+    pub fn with_view_dimensions(mut self, view_dimensions: wgpu::TextureViewDimension) -> Self {
+        self.view_dimensions = view_dimensions;
+        self
+    }
+
+    /// Set the shader stage visibility for the texture binding
+    pub fn with_visibility(mut self, visibility: wgpu::ShaderStages) -> Self {
+        self.visibility = visibility;
+        self
+    }
+}
+
+impl Bindable for TextureBinding {
+    fn as_binding(&self) -> wgpu::BindingType {
+        self.ty
+    }
+
+    fn target(&self) -> BindingTarget {
+        BindingTarget::Texture(self.tex_id)
+    }
+
+    fn visibility(&self) -> wgpu::ShaderStages {
+        self.visibility
+    }
+}
+
+/// Represents a buffer binding and entry in a bind group
+pub struct BufferBinding {
+    buf_id: BufferId,
+    ty: wgpu::BufferBindingType,
+    visibility: wgpu::ShaderStages,
+    has_dyn_offset: bool,
+    min_binding_size: Option<NonZero<u64>>
+}
+
+impl BufferBinding {
+    pub fn new(target: BufferId, ty: wgpu::BufferBindingType) -> Self {
+        Self {
+            buf_id: target,
+            ty,
+            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+            has_dyn_offset: false,
+            min_binding_size: None,
+        }
+    }
+
+    /// Create a new storage buffer binding
+    pub fn as_storage(target: BufferId, read_only: bool) -> Self {
+        let ty = wgpu::BufferBindingType::Storage { read_only };
+        BufferBinding::new(target, ty)
+    }
+
+    /// Create a new uniform buffer binding
+    pub fn as_uniform(target: BufferId) -> Self {
+        let ty = wgpu::BufferBindingType::Uniform;
+        BufferBinding::new(target, ty)
+    }
+
+    /// Set the shader stage visibility for the buffer binding
+    pub fn with_visibility(mut self, visibility: wgpu::ShaderStages) -> Self {
+        self.visibility = visibility;
+        self
+    }
+
+    /// Set the binding to have a dynamic offset
+    pub fn with_dynamic_offset(mut self) -> Self {
+        self.has_dyn_offset = true;
+        self
+    }
+
+    /// Set the minimum buffer size for the binding. Must be greater than 0.
+    pub fn with_min_size(mut self, size: u64) -> Self {
+        self.min_binding_size = Some(NonZero::new(size)
+            .expect("[Buffer Binding] Expected minimum binding size to be a non zero unsigned number."));
+        self
+    }
+}
+
+impl Bindable for BufferBinding {
+    fn as_binding(&self) -> wgpu::BindingType {
+        wgpu::BindingType::Buffer {
+            ty: self.ty,
+            has_dynamic_offset: self.has_dyn_offset,
+            min_binding_size: self.min_binding_size
+        }
+    }
+
+    fn target(&self) -> BindingTarget {
+        BindingTarget::Buffer(self.buf_id)
+    }
+
+    fn visibility(&self) -> wgpu::ShaderStages {
+        self.visibility
+    }
+}
+
+
+/// Represents the binding of a Sampler in a bind group
+pub struct SamplerBinding {
+    sampler_id: SamplerId,
+    visibility: wgpu::ShaderStages,
+    binding_type: wgpu::SamplerBindingType,
+}
+
+impl SamplerBinding {
+    pub fn new(target: SamplerId) -> Self {
+        Self {
+            sampler_id: target,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            binding_type: wgpu::SamplerBindingType::NonFiltering
+        }
+    }
+
+    /// Set the shader stage visibility for the sampler binding
+    pub fn with_visibility(mut self, visibility: wgpu::ShaderStages) -> Self {
+        self.visibility = visibility;
+        self
+    }
+
+    /// Set the binding type of the sampler binding
+    pub fn with_binding_type(mut self, ty: wgpu::SamplerBindingType) -> Self{
+        self.binding_type = ty;
+        self
+    }
+}
+
+impl Bindable for SamplerBinding {
+    fn as_binding(&self) -> wgpu::BindingType {
+        wgpu::BindingType::Sampler(self.binding_type)
+    }
+
+    fn target(&self) -> super::BindingTarget {
+        BindingTarget::Sampler(self.sampler_id)
+    }
+
+    fn visibility(&self) -> wgpu::ShaderStages {
+        self.visibility
+    }
+}

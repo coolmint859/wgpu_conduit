@@ -1,0 +1,102 @@
+use std::ops::Range;
+
+use crate::gpu_state::{BindGroupId, BufferId, GpuContext, PipelineId};
+
+/// Represents draw calls that can run in a `DrawCommand`
+pub trait DrawCall {
+    /// Issue this draw call on the provided render pass with the provided context
+    fn invoke(&mut self, pass: &mut wgpu::RenderPass, context: &GpuContext);
+}
+
+/// Draws an entity with an indexed or non-indexed draw call
+pub struct IndexedDraw {
+    /// The id to the pipeline the draw call will use
+    pip_id: PipelineId,
+    /// The set of bind groups used in the pipeline's shader
+    bind_groups: Vec<BindGroupId>,
+    /// The set of vertex buffers used in the draw call
+    vertex_buffers: Vec<BufferId>,
+    /// Optional index buffer. When set, `element_range` must be proportional to the size of this buffer.
+    index_buffer: Option<(BufferId, wgpu::IndexFormat)>,
+    /// The range of elements (vertices/indices) to draw with the pipeline
+    element_range: Range<u32>,
+    /// The range of instances to draw with the pipeline.
+    instance_range: Range<u32>,
+}
+
+impl IndexedDraw {
+    pub fn new(pip_id: PipelineId, element_range: Range<u32>) -> Self {
+        Self {
+            pip_id,
+            element_range,
+            bind_groups: Vec::new(),
+            vertex_buffers: Vec::new(),
+            index_buffer: None,
+            instance_range: 0..1,
+        }
+    }
+
+    /// Add a set of vertex buffers to the draw call.
+    pub fn with_vertex_buffers(mut self, buffers: &[BufferId]) -> Self {
+        self.vertex_buffers.extend_from_slice(buffers);
+        self
+    }
+
+    /// Add an index buffer to the draw call.
+    pub fn with_index_buffer(mut self, buffer: BufferId, format: wgpu::IndexFormat) -> Self {
+        self.index_buffer = Some((buffer, format));
+        self
+    }
+
+    /// Add a set of bind groups to the draw call
+    pub fn with_bind_groups(mut self, groups: &[BindGroupId]) -> Self {
+        self.bind_groups.extend_from_slice(groups);
+        self
+    }
+
+    /// Set the range of instances to draw. Must have a corresponding instance buffer that is at least as large as the maximum value in `range`.
+    pub fn with_instances(mut self, range: Range<u32>) -> Self {
+        self.instance_range = range;
+        self
+    }
+}
+
+impl DrawCall for IndexedDraw {
+    fn invoke(&mut self, pass: &mut wgpu::RenderPass, context: &GpuContext) {
+        let Some(pipeline) = context.get_pipeline(&self.pip_id).and_then(|pip| pip.to_render()) else { 
+            // println!("[DrawCommand] Failed to validate render pipeline @{:?}", self.pip_id);
+            return; 
+        };
+        pass.set_pipeline(&pipeline);
+
+        for (idx, bg_id) in self.bind_groups.iter().enumerate() {
+            let Some(bg) = context.get_bind_group(bg_id) else { 
+                // println!("[DrawCommand] Failed to validate bind group @{:?} for render pipeline @{:?}", bg_id, self.pip_id);
+                return; 
+            };
+            pass.set_bind_group(idx as u32, &bg.bind_group, &[]);
+        }
+
+        for (idx, vtx_id) in self.vertex_buffers.iter().enumerate() {
+            let Some(buffer) = context.resources.buffers.get(vtx_id) else {
+                // println!("[DrawCommand] Failed to validate vertex buffer @{:?} for render pipeline @{:?}", vtx_id, self.pip_id);
+                return;
+            };
+            pass.set_vertex_buffer(idx as u32, buffer.slice(..));
+        }
+
+        if let Some((idx_id, idx_fmt)) = self.index_buffer {
+            let Some(buffer) = context.resources.buffers.get(&idx_id) else {
+                // println!("[DrawCommand] Failed to validate index buffer @{:?} for render pipeline @{:?}", idx_id, self.pip_id);
+                return;
+            };
+            // println!("Executing indexed draw call for pipeline #{:?}", self.pip_id);
+
+            pass.set_index_buffer(buffer.slice(..), idx_fmt);
+            pass.draw_indexed(self.element_range.clone(), 0, self.instance_range.clone());
+        } else {
+            // println!("Executing draw call for pipeline @{:?}", self.pip_id);
+            pass.draw(self.element_range.clone(), self.instance_range.clone());
+        }
+    }
+}

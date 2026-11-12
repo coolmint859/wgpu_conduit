@@ -1,6 +1,6 @@
 use core::panic;
 
-use crate::{CanvasFrame, RenderAttachment, execution::DrawCall, gpu_state::{BindGroupId, GpuContext, PipelineId}};
+use crate::{CanvasFrame, RenderAttachment, execution::DrawCall, context::{BindGroupId, GpuContext, PipelineId}};
 /// Represents commands that can submitted and recorded by an Executor implementation.
 pub trait GpuCommand {
     /// Record this command using the provided encoder in the provided context

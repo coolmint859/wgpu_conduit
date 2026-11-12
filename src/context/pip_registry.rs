@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::{HashMap, HashSet}};
-use async_store::{HoldPolicy, ResourceHandler, Task};
+use async_store::{HoldPolicy, ResourceHandler, Task, TaskConfig};
 
-use crate::{core::GpuHandle, gpu_state::*, resources::*};
+use crate::{gpu::GpuHandle, context::*, blueprints::*};
 
 /// The resolved dependencies of a bind group
 pub(crate) struct PipelineDependencies {
@@ -104,8 +104,9 @@ impl PipelineRegistry {
             match blueprint {
                 PipelineType::Render(pip_bp) => {
                     let policy = pip_bp.hold_policy.unwrap_or(global_hp);
+                    let task_config = TaskConfig::new(policy);
 
-                    let r_pip_task = Task::io_bound(policy, async move {
+                    let r_pip_task = Task::io_bound(task_config, async move {
                         gpu.create_render_pipeline(pip_bp, deps.bg_layouts)
                     });
 
@@ -113,8 +114,9 @@ impl PipelineRegistry {
                 },
                 PipelineType::Compute(pip_bp) => {
                     let policy = pip_bp.hold_policy.unwrap_or(global_hp);
+                    let task_config = TaskConfig::new(policy);
 
-                    let c_pip_task = Task::io_bound(policy, async move {
+                    let c_pip_task = Task::io_bound(task_config, async move {
                         gpu.create_compute_pipeline(pip_bp, deps.bg_layouts)
                     });
 

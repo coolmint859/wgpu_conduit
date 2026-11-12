@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Instant};
 
-use wgpu_conduit::{DepthLoadOp, DrawCommand, Graphics, MultiBufferExecutor, StandardDepth, core::GraphicsInit};
+use wgpu_conduit::{DepthLoadOp, DrawCommand, Graphics, MultiBufferExecutor, StandardDepth, gpu::GraphicsInit};
 use winit::{application::ApplicationHandler, dpi::{PhysicalSize, Size}, event::WindowEvent, event_loop::{ActiveEventLoop, ControlFlow, EventLoop}, keyboard::{KeyCode, PhysicalKey}, window::{WindowAttributes, WindowId}};
 
 mod cube;

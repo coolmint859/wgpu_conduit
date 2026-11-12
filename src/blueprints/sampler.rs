@@ -3,7 +3,7 @@ use std::{hash::{DefaultHasher, Hash, Hasher}, marker::PhantomData, num::NonZero
 use async_store::HoldPolicy;
 use uuid::Uuid;
 
-use crate::gpu_state::*;
+use crate::context::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HashableSamplerDescriptor {
@@ -95,7 +95,7 @@ impl<T: Hash> Sampler<T> {
     }
 }
 
-impl<T: Hash> ResourceId for Sampler<T> {
+impl<T: Hash> GpuResource for Sampler<T> {
     type Id = SamplerId;
 
     fn create_id(&self) -> Self::Id {

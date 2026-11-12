@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use async_store::HoldPolicy;
 use uuid::Uuid;
 
-use crate::gpu_state::*;
+use crate::context::*;
 
 /// Represents types that can be serialized into slices of bytes.
 /// 
@@ -289,7 +289,7 @@ impl Buffer {
     }
 }
 
-impl ResourceId for Buffer {
+impl GpuResource for Buffer {
     type Id = BufferId;
 
     fn create_id(&self) -> Self::Id {

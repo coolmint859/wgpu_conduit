@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 use winit::window::{CursorGrabMode, Window};
 
-use crate::{AttachmentRecord, ColorAttachment, DepthAttachment, DepthLoadOp, RenderAttachment, gpu_state::GpuContext};
+use crate::{AttachmentRecord, ColorAttachment, DepthAttachment, DepthLoadOp, RenderAttachment, context::GpuContext};
 
 /// The width and height of the `Canvas`
 pub struct CanvasDimensions {

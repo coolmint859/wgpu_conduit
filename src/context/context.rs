@@ -1,7 +1,7 @@
 use std::{collections::HashSet};
-use async_store::{HoldPolicy, ResourceHandler, Task};
+use async_store::{HoldPolicy, ResourceHandler, Task, TaskConfig};
 
-use crate::{core::GpuHandle, gpu_state::*, resources::*};
+use crate::{gpu::GpuHandle, context::*, blueprints::*};
 
 /// The hold policy for all gpu resources globally. All resources have an indefinite hold policy by default.
 /// 
@@ -28,7 +28,7 @@ impl Default for GlobalHoldPolicy {
 }
 
 /// Represents types that can be identified as a gpu resource
-pub trait ResourceId {
+pub trait GpuResource {
     /// The id type mapped to the `ResourceId` type
     type Id;
 
@@ -112,9 +112,10 @@ impl GpuContext {
         let id = blueprint.create_id();
 
         let policy = blueprint.hold_policy.unwrap_or(self.global_hp.buffers);
-        
+        let task_config = TaskConfig::new(policy);
+
         let gpu = self.gpu.clone();
-        let buffer_task = Task::io_bound( policy, async move {
+        let buffer_task = Task::io_bound( task_config, async move {
             gpu.create_buffer(blueprint, source.data, source.capacity)
         });
 
@@ -138,9 +139,10 @@ impl GpuContext {
         let id = blueprint.create_id();
 
         let policy = blueprint.hold_policy.unwrap_or(self.global_hp.buffers);
+        let task_config = TaskConfig::new(policy);
 
         let gpu = self.gpu.clone();
-        let texture_task = Task::io_bound(policy, async move {
+        let texture_task = Task::io_bound(task_config, async move {
             gpu.create_texture(blueprint, source)
         });
 
@@ -158,9 +160,10 @@ impl GpuContext {
         let id = blueprint.create_id();
 
         let policy = hold_policy.unwrap_or(self.global_hp.buffers);
+        let task_config = TaskConfig::new(policy);
         
         let gpu = self.gpu.clone();
-        let texture_task = Task::io_bound(policy, async move {
+        let texture_task = Task::io_bound(task_config, async move {
             gpu.create_texture(blueprint, source)
         });
 
@@ -182,15 +185,16 @@ impl GpuContext {
     /// Returns a `SamplerId` that is content-addressable to the blueprint. (This ensures that identical sampler blueprints map to the same id)
     pub fn request_sampler<B>(&mut self, blueprint: B) -> SamplerId 
     where 
-        B: SamplerType + ResourceId<Id = SamplerId>
+        B: SamplerType + GpuResource<Id = SamplerId>
     {
         let id = blueprint.create_id();
         if self.resources.samplers.contains(&id) { return id; }
 
         let policy = blueprint.hold_policy().unwrap_or(self.global_hp.buffers);
+        let task_config = TaskConfig::new(policy);
 
         let gpu = self.gpu.clone();
-        let sampler_task = Task::io_bound(policy, async move {
+        let sampler_task = Task::io_bound(task_config, async move {
             gpu.create_sampler(blueprint)
         });
 
@@ -202,7 +206,7 @@ impl GpuContext {
     /// Request a bind group to be created from the provided blueprint
     /// 
     /// Returns a `BindGroupIdPair`, which contains a unique `BindGroupId` and content-addressable `LayoutId`.
-    pub fn request_bind_group(&mut self, blueprint: BindGroup) -> BindGroupIdPair {
+    pub fn request_bind_group(&mut self, blueprint: BindGroupBlueprint) -> BindGroupIdPair {
         return self.bg_registry.request_bg(blueprint, &self.resources, self.global_hp.bind_groups);
     }
 
@@ -211,7 +215,7 @@ impl GpuContext {
     /// If `test_pair` maps to an already requested bind group, it's returned back to the caller. Otherwise a new bind group is requested from `blueprint`, and a new `BindGroupIdPair` is returned. 
     /// 
     /// Note: If the layout the bind group uses was already requested before, it's `LayoutId` will be the same regardless of whether the bind group is requested new.
-    pub fn ensure_bind_group(&mut self, test_pair: BindGroupIdPair, blueprint: BindGroup) -> BindGroupIdPair {
+    pub fn ensure_bind_group(&mut self, test_pair: BindGroupIdPair, blueprint: BindGroupBlueprint) -> BindGroupIdPair {
         if self.is_bindgroup_requested(&test_pair.id) { return test_pair};
         self.request_bind_group(blueprint)
     }
@@ -345,13 +349,18 @@ impl GpuContext {
     }
 
     /// Returns the raw wgpu texture associated with the provided id, if available.
-    pub fn get_texture(&self, tex_id: &TextureId) -> Option<TextureHandle> {
-        self.resources.textures.get(tex_id).cloned()
+    pub fn get_texture(&self, tex_id: &TextureId) -> Option<&TextureHandle> {
+        self.resources.textures.get(tex_id)
+    }
+
+    /// Returns the wgpu texture view associated with the provided id, if available.
+    pub fn get_texture_view(&self, tex_id: &TextureId) -> Option<&wgpu::TextureView> {
+        self.resources.textures.get(tex_id).map(|tex| &tex.view)
     }
 
     /// Returns the raw wgpu sampler associated with the provided id, if available.
-    pub fn get_sampler(&self, samp_id: &SamplerId) -> Option<wgpu::Sampler> {
-        self.resources.samplers.get(samp_id).cloned()
+    pub fn get_sampler(&self, samp_id: &SamplerId) -> Option<&wgpu::Sampler> {
+        self.resources.samplers.get(samp_id)
     }
 
     /// Returns a validated bind group.

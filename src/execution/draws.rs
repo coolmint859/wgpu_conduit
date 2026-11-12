@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::gpu_state::{BindGroupId, BufferId, GpuContext, PipelineId};
+use crate::context::{BindGroupId, BufferId, GpuContext, PipelineId};
 
 /// Represents draw calls that can run in a `DrawCommand`
 pub trait DrawCall {

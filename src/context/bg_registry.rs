@@ -1,7 +1,7 @@
 use std::{cell::{Cell, RefCell}, collections::{HashMap, HashSet}, ops::Deref};
-use async_store::{HoldPolicy, ResourceHandler, Task};
+use async_store::{HoldPolicy, ResourceHandler, Task, TaskConfig};
 
-use crate::{core::GpuHandle, gpu_state::*, resources::*};
+use crate::{gpu::GpuHandle, context::*, blueprints::*};
 
 /// A handle to a bind group and associated layout
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,19 +36,15 @@ impl Deref for BindGroupLayoutHandle {
 /// Contains the dependencies of a bind group. Used in bind group creation and to determine validity.
 pub(crate) struct BindGroupDependencies {
     layout: BindGroupLayoutHandle,
-    /// the buffers attached to a bind group, including the slot number
-    buffers: Vec<(BufferId, wgpu::Buffer, u32)>,
-    /// the textures attached to a bind group, including the slot number
-    textures: Vec<(TextureId, TextureHandle, u32)>,
-    /// the samplers attached to a bind group, including the slot number
-    samplers: Vec<(SamplerId, wgpu::Sampler, u32)>,
+    /// the resolved targets attached to a bind group, including the slot number
+    targets: Vec<(ResolvedTarget, u32)>,
 }
 
 /// Keeps track of and validates requests for bind groups
 pub(crate) struct BindGroupRegistry {
     gpu: GpuHandle,
     /// map of ids of bind group that have yet to pass request validation
-    deferred: HashMap<BindGroupId, (LayoutId, BindGroup)>,
+    deferred: HashMap<BindGroupId, (LayoutId, BindGroupBlueprint)>,
     /// the set of bind groups that are known to be valid. 
     valid_bgs: RefCell<HashSet<BindGroupId>>,
     /// The handles to bind groups
@@ -56,7 +52,7 @@ pub(crate) struct BindGroupRegistry {
     /// The handles to bind group layouts
     pub(crate) layout_handles: ResourceHandler<LayoutId, BindGroupLayoutHandle, String>,
     /// maps bind groups to their blueprints
-    pub(crate) bg_blueprints: HashMap<BindGroupId, BindGroup>,
+    pub(crate) bg_blueprints: HashMap<BindGroupId, BindGroupBlueprint>,
 }
 
 impl BindGroupRegistry {
@@ -72,14 +68,15 @@ impl BindGroupRegistry {
     }
 
     /// Request a new bind group layout
-    pub fn request_layout(&mut self, id: &LayoutId, blueprint: &BindGroup) {
+    pub fn request_layout(&mut self, id: &LayoutId, blueprint: &BindGroupBlueprint) {
         if self.layout_handles.contains(id) { return; };
 
         let gpu = self.gpu.clone();
         let builder = blueprint.clone();
 
-        let policy = HoldPolicy::Indefinite;
-        let layout_task = Task::io_bound(policy, async move {
+        let task_config = TaskConfig::new(HoldPolicy::Indefinite);
+
+        let layout_task = Task::io_bound(task_config, async move {
             gpu.create_bg_layout(builder)
                 .and_then(|layout| Ok(BindGroupLayoutHandle { layout, ref_count: Cell::new(1)}))
         });
@@ -88,7 +85,7 @@ impl BindGroupRegistry {
     }
 
     /// Request a new bind group
-    pub fn request_bg<'a>(&mut self, blueprint: BindGroup, resources: &'a GpuResources, global_hp: HoldPolicy) -> BindGroupIdPair {
+    pub fn request_bg(&mut self, blueprint: BindGroupBlueprint, resources: &GpuResources, global_hp: HoldPolicy) -> BindGroupIdPair {
         let bg_id = blueprint.create_id();
         let layout_id = blueprint.layout.create_id();
         
@@ -101,7 +98,7 @@ impl BindGroupRegistry {
     }
 
     /// sync the registry and process deferred groups
-    pub fn sync<'a>(&mut self, resources: &'a GpuResources, global_hp: HoldPolicy) {
+    pub fn sync(&mut self, resources: &GpuResources, global_hp: HoldPolicy) {
         self.layout_handles.sync();
         self.bg_handles.sync();
 
@@ -172,7 +169,7 @@ impl BindGroupRegistry {
     /// Try requesting a new bind group and layout tied to the provided ids.
     fn try_request_bg(
         &mut self, 
-        blueprint: BindGroup,
+        blueprint: BindGroupBlueprint,
         resources: &GpuResources,
         global_hp: HoldPolicy,
         bg_id: &BindGroupId, 
@@ -188,35 +185,25 @@ impl BindGroupRegistry {
             self.check_inc_bgl(&layout_id);
 
             let gpu = self.gpu.clone();
-            let builder = blueprint.clone();
-            let layout_id_copy = layout_id.clone();
-
+            let layout_id = layout_id.clone();
             let policy = blueprint.hold_policy.unwrap_or(global_hp);
+            let task_config = TaskConfig::new(policy);
 
-            let bind_group_task = Task::io_bound(policy, async move {
+            let bind_group_task = Task::io_bound(task_config, async move {
                 let mut entries = Vec::new();
 
-                for (_id, buf, slot) in &deps.buffers {
+                for (target, slot) in &deps.targets {
                     entries.push(wgpu::BindGroupEntry {
                         binding: *slot,
-                        resource: buf.as_entire_binding()
-                    });
-                }
-                for (_id, tex, slot) in &deps.textures {
-                    entries.push(wgpu::BindGroupEntry {
-                        binding: *slot,
-                        resource: wgpu::BindingResource::TextureView(tex)
-                    });
-                }
-                for (_id, samp, slot) in &deps.samplers {
-                    entries.push(wgpu::BindGroupEntry {
-                        binding: *slot,
-                        resource: wgpu::BindingResource::Sampler(samp)
+                        resource: target.to_wgpu_binding()
                     });
                 }
 
-                gpu.create_bind_group(builder, entries, deps.layout)
-                    .and_then(|bg| Ok(BindGroupHandle { bind_group: bg, layout_id: layout_id_copy}))
+                gpu.create_bind_group(blueprint, entries, deps.layout)
+                    .and_then(|bind_group| Ok(BindGroupHandle { 
+                        bind_group, 
+                        layout_id 
+                    }))
             });
 
             self.bg_handles.request(*bg_id, bind_group_task);
@@ -238,67 +225,27 @@ impl BindGroupRegistry {
     }
 
     /// Fetches bind group dependencies if they are ready. If at least one dependency is not yet ready, None is returned
-    fn resolve_dependencies<'a>(
+    fn resolve_dependencies(
         &self, 
         layout_id: &LayoutId,
-        blueprint: &BindGroup,
-        resources: &'a GpuResources,
+        blueprint: &BindGroupBlueprint,
+        resources: &GpuResources,
     ) -> Option<BindGroupDependencies> {
-        let layout = self.layout_handles.get(layout_id)?.clone();
-
-        let mut buffer_handles = Vec::new();
-        let mut texture_handles = Vec::new();
-        let mut sampler_handles = Vec::new();
-
+        let mut targets = Vec::new();
         for binding in &blueprint.bindings {
-            match &binding.target {
-                BindingTarget::Buffer(buf_id) => {
-                    if let Some(handle) = resources.buffers.get(buf_id) {
-                        buffer_handles.push((*buf_id, handle.clone(), binding.slot));
-                    } else {
-                        return None; // buffer missing, dependency unresolved
-                    }
-                },
-                BindingTarget::Texture(tex_id) => {
-                    if let Some(handle) = resources.textures.get(tex_id) {
-                        texture_handles.push((*tex_id, handle.clone(), binding.slot));
-                    } else {
-                        return None; // texture missing, dependency unresolved
-                    }
-                }
-                BindingTarget::Sampler(samp_id) => {
-                    if let Some(handle) = resources.samplers.get(samp_id) {
-                        sampler_handles.push((*samp_id, handle.clone(), binding.slot));
-                    } else {
-                        return None; // sampler missing, dependency unresolved
-                    }
-                }
-            }
+            let target = binding.target.resolve(resources)?;
+            targets.push((target, binding.slot));
         }
-
-        return Some(BindGroupDependencies {
-            layout,
-            buffers: buffer_handles,
-            textures: texture_handles,
-            samplers: sampler_handles
-        })
+        
+        let layout = self.layout_handles.get(layout_id)?.clone();
+        return Some(BindGroupDependencies { layout, targets })
     }
 
     /// Marks the dependencies of a bind group as accessed. This is called if a bind group was found to be valid, ensuring the dependencies stay alive for the next frame.
     fn mark_dependencies_accessed(&self, bg_id: &BindGroupId, resources: &GpuResources) {
         if let Some(blueprint) = self.bg_blueprints.get(bg_id) {
             for binding in &blueprint.bindings {
-                match &binding.target {
-                    BindingTarget::Buffer(buf_id) => {
-                        resources.buffers.mark_accessed(buf_id);
-                    },
-                    BindingTarget::Texture(tex_id) => {
-                        resources.textures.mark_accessed(tex_id);
-                    }
-                    BindingTarget::Sampler(samp_id) => {
-                        resources.samplers.mark_accessed(samp_id);
-                    }
-                }
+                binding.target.mark_accessed(resources);
             }
         }
     }

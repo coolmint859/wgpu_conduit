@@ -45,7 +45,7 @@ pub struct AttachmentConfig {
 
 impl AttachmentConfig {
     /// Creates a new texture handle from this config's blueprint with the provided dimensions.
-    pub(crate) fn create_handle(&self, width: u32, height: u32, context: &mut GpuContext) -> TextureHandle {
+    pub(crate) fn create_handle(&self, width: u32, height: u32, context: &GpuContext) -> TextureHandle {
         let dim = self.dims.as_tex_dims(width, height);
         
         context

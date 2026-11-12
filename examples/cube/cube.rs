@@ -1,4 +1,4 @@
-use wgpu_conduit::{BindGroup, BindGroupIdPair, Buffer, BufferBinding, BufferId, BufferSource, DrawCommand, GpuContext, Graphics, IndexedDraw, Pipeline, PipelineId, Procedural, Sampler, SamplerBinding, ShaderSource, StandardDepth, StructuredUpdate, TexDimensions, Texture, TextureBinding, TextureTypeSampled, VertexBufferLayout, VertexLayout};
+use wgpu_conduit::{BindGroupBlueprint, BindGroupIdPair, Buffer, BufferBinding, BufferId, BufferSource, DrawCommand, GpuContext, Graphics, IndexedDraw, Pipeline, PipelineId, Procedural, SampledTextureOptions, Sampler, SamplerBinding, ShaderSource, StandardDepth, StructuredUpdate, TexDimensions, Texture, TextureBinding, VertexBufferLayout, VertexLayout};
 
 /// A vertex with a position and color attribute
 #[repr(C)]
@@ -106,7 +106,7 @@ impl ColoredCube {
         );
 
         let bg = graphics.context.request_bind_group(
-            BindGroup::new()
+            BindGroupBlueprint::new()
                 .with_entry(BufferBinding::as_uniform(cam_id))
                 .with_entry(BufferBinding::as_uniform(model_mat))
                 .with_label("cube_color_bg")
@@ -188,12 +188,12 @@ impl TexturedCube {
         );
 
         let bg = graphics.context.request_bind_group(
-            BindGroup::new()
+            BindGroupBlueprint::new()
                 .with_label("cube_textured_bg")
                 .with_entry(BufferBinding::as_uniform(cam_id))
                 .with_entry(BufferBinding::as_uniform(model_mat))
-                .with_entry(TextureBinding::as_sampled(tex, TextureTypeSampled::filterable()))
-                .with_entry(SamplerBinding::new(samp).with_binding_type(wgpu::SamplerBindingType::NonFiltering))
+                .with_entry(TextureBinding::as_sampled(tex, SampledTextureOptions::nonfilterable()))
+                .with_entry(SamplerBinding::non_filtering(samp))
         );
 
         let shader = ShaderSource::Embedded(include_str!(".././shaders/textured_3d.wgsl"));

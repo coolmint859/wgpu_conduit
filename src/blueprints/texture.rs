@@ -4,7 +4,7 @@ use async_store::HoldPolicy;
 use image::GenericImageView;
 use uuid::Uuid;
 
-use crate::gpu_state::*;
+use crate::context::*;
 
 pub struct TextureData {
     pub data: Option<Vec<u8>>,
@@ -257,7 +257,7 @@ impl Texture {
     }
 }
 
-impl ResourceId for Texture {
+impl GpuResource for Texture {
     type Id = TextureId;
 
     fn create_id(&self) -> Self::Id {

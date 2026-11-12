@@ -3,7 +3,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use async_store::HoldPolicy;
 use uuid::Uuid;
 
-use crate::{gpu_state::*, resources::{VertexBufferLayout, VertexLayout}};
+use crate::{context::*, blueprints::{VertexBufferLayout, VertexLayout}};
 
 /// The method of obtaining the source code for a shader module
 #[derive(Clone, Debug, Hash)]
@@ -141,7 +141,7 @@ impl From<Pipeline<Compute>> for PipelineType {
     }
 }
 
-impl ResourceId for PipelineType {
+impl GpuResource for PipelineType {
     type Id = PipelineId;
 
     fn create_id(&self) -> Self::Id {
@@ -182,7 +182,7 @@ impl<T: Hash> Pipeline<T> {
     }
 }
 
-impl<T: Hash> ResourceId for Pipeline<T> {
+impl<T: Hash> GpuResource for Pipeline<T> {
     type Id = PipelineId;
 
     fn create_id(&self) -> Self::Id {

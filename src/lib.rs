@@ -1,9 +1,11 @@
-pub mod core;
+pub mod gpu;
 pub mod execution;
-pub mod gpu_state;
-pub mod resources;
+pub mod context;
+pub mod blueprints;
+pub mod canvas;
 
-pub use core::*;
+pub use gpu::*;
 pub use execution::*;
-pub use gpu_state::*;
-pub use resources::*;
+pub use context::*;
+pub use blueprints::*;
+pub use canvas::*;

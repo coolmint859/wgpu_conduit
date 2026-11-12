@@ -2,7 +2,7 @@ use std::{borrow::Cow, println};
 
 use wgpu::util::DeviceExt;
 
-use crate::{gpu_state::BindGroupLayoutHandle, resources::*};
+use crate::{context::BindGroupLayoutHandle, blueprints::*};
 
 /// Handle to the gpu device and queue
 #[derive(Clone, Debug)]
@@ -99,7 +99,7 @@ impl GpuHandle {
         Ok(sampler)
     }
 
-    pub fn create_bg_layout(&self, blueprint: BindGroup) -> Result<wgpu::BindGroupLayout, String> {
+    pub fn create_bg_layout(&self, blueprint: BindGroupBlueprint) -> Result<wgpu::BindGroupLayout, String> {
         let layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{
             label: Some(&format!("Layout: {}", blueprint.label)),
             entries: &blueprint.layout.entries
@@ -113,7 +113,7 @@ impl GpuHandle {
     /// Create a new bind group from the given configuration builder and resource map
     pub fn create_bind_group(
         &self,
-        blueprint: BindGroup, 
+        blueprint: BindGroupBlueprint, 
         entries: Vec<wgpu::BindGroupEntry<'_>>,
         layout: BindGroupLayoutHandle,
     ) -> Result<wgpu::BindGroup, String> {

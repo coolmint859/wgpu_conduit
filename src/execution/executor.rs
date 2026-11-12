@@ -1,4 +1,4 @@
-use crate::{DrawCommand, execution::GpuCommand, gpu_state::GpuContext};
+use crate::{DrawCommand, execution::GpuCommand, context::GpuContext};
 
 /// Represents the execution phase of gpu operations.
 pub trait SequentialExecutor {

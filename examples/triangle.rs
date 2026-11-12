@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use wgpu_conduit::{DrawCommand, Graphics, MultiBufferExecutor, core::GraphicsInit, execution::IndexedDraw, gpu_state::{BufferId, GpuContext, PipelineId}, resources::{Buffer, BufferSource, Pipeline, ShaderSource, VertexBufferLayout, VertexLayout}};
-use winit::{application::ApplicationHandler, dpi::{PhysicalSize, Size}, event::WindowEvent, event_loop::{ControlFlow, EventLoop}, window::WindowAttributes};
+use wgpu_conduit::{DrawCommand, Graphics, MultiBufferExecutor, gpu::GraphicsInit, execution::IndexedDraw, context::{BufferId, GpuContext, PipelineId}, blueprints::{Buffer, BufferSource, Pipeline, ShaderSource, VertexBufferLayout, VertexLayout}};
+use winit::{application::ApplicationHandler, dpi::{PhysicalSize, Size}, event::WindowEvent, event_loop::{ActiveEventLoop, ControlFlow, EventLoop}, window::{WindowAttributes, WindowId}};
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -94,7 +94,7 @@ impl App {
 }
 
 impl ApplicationHandler for App {
-    fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let window_dims = Size::Physical(PhysicalSize { width: 1000, height: 1000 });
 
         let window_attrs = WindowAttributes::default()
@@ -114,20 +114,14 @@ impl ApplicationHandler for App {
         self.triangle = Some(triangle);
     }
 
-    fn about_to_wait(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         let Some(graphics) = &mut self.graphics else { return; };
 
         graphics.sync_context();
         graphics.request_redraw();
     }
 
-    fn window_event(
-        &mut self,
-        event_loop: &winit::event_loop::ActiveEventLoop,
-        _window_id: winit::window::WindowId,
-        event: winit::event::WindowEvent,
-    )
-    {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::RedrawRequested => self.render(),

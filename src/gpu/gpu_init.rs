@@ -2,7 +2,7 @@
 use std::{collections::HashMap, sync::Arc};
 use winit::window::Window;
 
-use crate::{AttachmentConfig, AttachmentRecord, CanvasTextures, RenderAttachment, core::{Canvas, GpuHandle}, gpu_state::{GlobalHoldPolicy, GpuContext}};
+use crate::{AttachmentConfig, AttachmentRecord, Canvas, CanvasTextures, RenderAttachment, gpu::GpuHandle, context::{GlobalHoldPolicy, GpuContext}};
 
 /// Graphics initialization errors
 #[derive(Clone, Debug)]
@@ -114,7 +114,7 @@ impl GraphicsInit {
         self
     }
 
-    /// Add a standard render attachment by key. These are forwarded to the `Canvas` during initialization to be used during rendering.
+    /// Add a color attachment. These are forwarded to the `Canvas` during initialization to be used during rendering.
     pub fn with_color_attachment(mut self, atm: impl RenderAttachment) -> Self {
         self.color_attachments.insert(atm.name().to_string(), atm.into_config());
         self
@@ -122,7 +122,7 @@ impl GraphicsInit {
 
     /// Add a depth attachment. These are forwarded to the `Canvas` during initialization to be used during rendering.
     /// 
-    /// Note that `Pipelines` and `DrawCommands` can be configured with only one depth attachment at a time.
+    /// Note that `Pipelines` and `DrawCommands` can only be configured with one depth attachment at a time.
     pub fn with_depth_attachment(mut self, atm: impl RenderAttachment) -> Self {
         self.depth_attachments.insert(atm.name().to_string(), atm.into_config());
         self
@@ -175,23 +175,27 @@ impl GraphicsInit {
 
         let mut context = GpuContext::new(gpu, self.global_hp);
         
-        let colors= self.color_attachments.iter().map(|(atm_name, config)| {
-            let name = atm_name.clone();
-            let tex = config.create_handle(size.width, size.height, &mut context);
-            let record = AttachmentRecord { config: config.clone(), tex };
+        let colors = self.color_attachments
+            .iter()
+                .map(|(atm_name, config)| {
+                let name = atm_name.clone();
+                let tex = config.create_handle(size.width, size.height, &mut context);
+                let record = AttachmentRecord { config: config.clone(), tex };
 
-            (name, record)
-        })
-        .collect();
+                (name, record)
+            })
+            .collect();
 
-        let depths = self.depth_attachments.iter().map(|(atm_name, config)| {
-            let name = atm_name.clone();
-            let tex = config.create_handle(size.width, size.height, &mut context);
-            let record = AttachmentRecord { config: config.clone(), tex };
+        let depths = self.depth_attachments
+            .iter()
+            .map(|(atm_name, config)| {
+                let name = atm_name.clone();
+                let tex = config.create_handle(size.width, size.height, &mut context);
+                let record = AttachmentRecord { config: config.clone(), tex };
 
-            (name, record)
-        })
-        .collect();
+                (name, record)
+            })
+            .collect();
         
         let canvas = Canvas::new(window, CanvasTextures {
             surface, colors, depths, config

@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::{HashMap, HashSet}};
 use async_store::{HoldPolicy, ResourceHandler, Task, TaskConfig};
 
-use crate::{gpu::GpuHandle, context::*, blueprints::*};
+use crate::{context::*, blueprints::*};
 
 /// The resolved dependencies of a bind group
 pub(crate) struct PipelineDependencies {
@@ -12,8 +12,8 @@ pub(crate) struct PipelineDependencies {
 pub(crate) struct PipelineRegistry {
     gpu: GpuHandle,
     handles: ResourceHandler<PipelineId, PipelineHandle, String>,
-    pip_bps: HashMap<PipelineId, PipelineType>,
-    deferred: HashMap<PipelineId, PipelineType>,
+    pip_bps: HashMap<PipelineId, Pipeline>,
+    deferred: HashMap<PipelineId, Pipeline>,
     valid_pips: RefCell<HashSet<PipelineId>>
 }
 
@@ -29,7 +29,7 @@ impl PipelineRegistry {
     }
 
     /// Request a new pipeline
-    pub fn request(&mut self, blueprint: PipelineType, bgs: &BindGroupRegistry, global_hp: HoldPolicy) -> PipelineId {
+    pub fn request(&mut self, blueprint: Pipeline, bgs: &BindGroupRegistry, global_hp: HoldPolicy) -> PipelineId {
         let id = blueprint.create_id();
 
         // pipeline ids are content-addressable, so its possible the same blueprint was used
@@ -85,7 +85,7 @@ impl PipelineRegistry {
     fn try_request(
         &mut self,
         pip_id: &PipelineId,
-        blueprint: PipelineType, 
+        blueprint: Pipeline, 
         bgs: &BindGroupRegistry,
         global_hp: HoldPolicy
     ) {
@@ -102,7 +102,7 @@ impl PipelineRegistry {
 
             let gpu = self.gpu.clone();
             match blueprint {
-                PipelineType::Render(pip_bp) => {
+                Pipeline::Render(pip_bp) => {
                     let policy = pip_bp.hold_policy.unwrap_or(global_hp);
                     let task_config = TaskConfig::new(policy);
 
@@ -112,7 +112,7 @@ impl PipelineRegistry {
 
                     self.handles.request(*pip_id, r_pip_task);
                 },
-                PipelineType::Compute(pip_bp) => {
+                Pipeline::Compute(pip_bp) => {
                     let policy = pip_bp.hold_policy.unwrap_or(global_hp);
                     let task_config = TaskConfig::new(policy);
 
@@ -129,7 +129,7 @@ impl PipelineRegistry {
     }
 
     /// Resolves the dependencies of a pipeline given it's `blueprint` and a `BindGroupRegistry`
-    fn resolve_dependencies(&self, blueprint: &PipelineType, bgs: &BindGroupRegistry) -> Option<PipelineDependencies> {
+    fn resolve_dependencies(&self, blueprint: &Pipeline, bgs: &BindGroupRegistry) -> Option<PipelineDependencies> {
         let mut bg_layouts = Vec::new();
         for bgl_id in blueprint.bg_layouts().iter() {
             if let Some(layout) =  bgs.layout_handles.get(bgl_id).cloned() {

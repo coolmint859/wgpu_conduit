@@ -152,14 +152,14 @@ pub struct BufferPayload {
 
 /// A blueprint for constructing wgpu Buffers, where T is the buffer type.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct Buffer {
+pub struct BufferBlueprint {
     pub label: String,
     pub usage: wgpu::BufferUsages,
     pub alignment: Option<u64>,
     pub hold_policy: Option<HoldPolicy>
 }
 
-impl Buffer {
+impl BufferBlueprint {
     /// Create a buffer blueprint with the uniform usage type.
     /// 
     /// All Uniform buffers have a default capacity of 16 to follow wgpu alignment rules
@@ -276,7 +276,7 @@ impl Buffer {
     /// Aligns `capacity` to the nearest multiple of 16 if this buffer has the uniform usage.
     pub(crate) fn into_payload(self, data: Option<Vec<u8>>, capacity: u64) -> BufferPayload {
         let capacity = match self.alignment {
-            Some(alignment) => Buffer::align(capacity, alignment),
+            Some(alignment) => BufferBlueprint::align(capacity, alignment),
             None => capacity
         };
 
@@ -289,7 +289,7 @@ impl Buffer {
     }
 }
 
-impl GpuResource for Buffer {
+impl GpuResource for BufferBlueprint {
     type Id = BufferId;
 
     fn create_id(&self) -> Self::Id {

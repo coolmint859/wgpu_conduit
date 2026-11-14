@@ -1,7 +1,13 @@
 use std::sync::Arc;
 
-use wgpu_conduit::{DrawCommand, Graphics, MultiBufferExecutor, gpu::GraphicsInit, execution::IndexedDraw, context::{BufferId, GpuContext, PipelineId}, blueprints::{Buffer, BufferSource, Pipeline, ShaderSource, VertexBufferLayout, VertexLayout}};
+use wgpu_conduit::{Canvas, DrawCommand, MultiBufferExecutor, PipelineBlueprint, blueprints::{BufferBlueprint, BufferSource, ShaderSource, VertexBufferLayout, VertexLayout}, context::{BufferId, GpuContext, PipelineId}, execution::IndexedDraw};
 use winit::{application::ApplicationHandler, dpi::{PhysicalSize, Size}, event::WindowEvent, event_loop::{ActiveEventLoop, ControlFlow, EventLoop}, window::{WindowAttributes, WindowId}};
+
+/// Container for the gpu context and rendering canvas
+pub struct Graphics {
+    pub context: GpuContext,
+    pub canvas: Canvas,
+}
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -27,7 +33,7 @@ pub struct Triangle {
 impl Triangle {
     pub fn new(context: &mut GpuContext) -> Self {
         let vertices = context.request_buffer(
-            Buffer::as_vertex(), 
+            BufferBlueprint::as_vertex(), 
             BufferSource::from_vec(vec![
                 Vertex { position: [ 0.0,  0.5, 0.0], color: [1.0, 0.0, 0.0] },
                 Vertex { position: [-0.5, -0.5, 0.0], color: [0.0, 1.0, 0.0] },
@@ -36,13 +42,14 @@ impl Triangle {
         );
 
         let indices = context.request_buffer(
-            Buffer::as_index(), 
+            BufferBlueprint::as_index(), 
             BufferSource::from_vec(vec![0u32, 1, 2])
         );
 
         let shader = ShaderSource::Embedded(include_str!("shaders/2d_render.wgsl"));
         let pipeline = context.request_pipeline(
-            Pipeline::as_render(shader).with_vertex_layout::<Vertex>()
+            PipelineBlueprint::as_render(shader)
+                .with_vertex_layout::<Vertex>()
         );
 
         Self {
@@ -103,22 +110,26 @@ impl ApplicationHandler for App {
 
         let window = Arc::new(event_loop.create_window(window_attrs).unwrap());
 
-        let mut graphics = GraphicsInit::new()
+        let mut context = GpuContext::builder()
             .with_backend(wgpu::Backends::DX12)
-            .init_blocking(window)
-            .expect("Failed to initialize graphics environment");
+            .init_blocking()
+            .expect("Failed to initialize gpu context");
 
-        let triangle = Triangle::new(&mut graphics.context);
+        let canvas = Canvas::builder()
+            .init(window, &context)
+            .expect("Failed to initialize rendering canvas");
 
-        self.graphics = Some(graphics);
+        let triangle = Triangle::new(&mut context);
+
+        self.graphics = Some(Graphics { context, canvas });
         self.triangle = Some(triangle);
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         let Some(graphics) = &mut self.graphics else { return; };
 
-        graphics.sync_context();
-        graphics.request_redraw();
+        graphics.context.sync();
+        graphics.canvas.request_redraw();
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {

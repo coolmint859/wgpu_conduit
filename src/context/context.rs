@@ -3,30 +3,6 @@ use async_store::{HoldPolicy, ResourceHandler, Task, TaskConfig};
 
 use crate::{gpu::GpuHandle, context::*, blueprints::*};
 
-/// The hold policy for all gpu resources globally. All resources have an indefinite hold policy by default.
-/// 
-/// These are followed internally by the context unless a resource is configured otherwise.
-#[derive(Debug, Clone, Copy)]
-pub struct GlobalHoldPolicy {
-    pub buffers: HoldPolicy,
-    pub textures: HoldPolicy,
-    pub samplers: HoldPolicy,
-    pub bind_groups: HoldPolicy,
-    pub pipelines: HoldPolicy,
-}
-
-impl Default for GlobalHoldPolicy {
-    fn default() -> Self {
-        Self {
-            buffers: HoldPolicy::Indefinite,
-            textures: HoldPolicy::Indefinite,
-            samplers: HoldPolicy::Indefinite,
-            bind_groups: HoldPolicy::Indefinite,
-            pipelines: HoldPolicy::Indefinite,
-        }
-    }
-}
-
 /// Represents types that can be identified as a gpu resource
 pub trait GpuResource {
     /// The id type mapped to the `ResourceId` type
@@ -89,8 +65,15 @@ pub struct GpuContext {
 }
 
 impl GpuContext {
+    /// Create a new `GpuContext` from a builder. 
+    /// 
+    /// You typically only need to call this once per application.
+    pub fn builder() -> ContextBuilder {
+        ContextBuilder::new()
+    }
+
     /// Create a new `GpuContext` from a `GpuHandle`.
-    pub fn new(gpu: GpuHandle, global_hp: GlobalHoldPolicy) -> Self {
+    pub(crate) fn new(gpu: GpuHandle, global_hp: GlobalHoldPolicy) -> Self {
         Self {
             resources: GpuResources::new(),
             bg_registry: BindGroupRegistry::new(gpu.clone()),
@@ -108,7 +91,7 @@ impl GpuContext {
     /// Request a buffer to be created from the provided blueprint.
     /// 
     /// Returns a `BufferId` that is uniquely associated with the resultant wgpu `Buffer`.
-    pub fn request_buffer<S>(&mut self, blueprint: Buffer, source: BufferSource<S>) -> BufferId {
+    pub fn request_buffer<S>(&mut self, blueprint: BufferBlueprint, source: BufferSource<S>) -> BufferId {
         let id = blueprint.create_id();
 
         let policy = blueprint.hold_policy.unwrap_or(self.global_hp.buffers);
@@ -127,7 +110,7 @@ impl GpuContext {
     /// Ensures a buffer has been requested.
     /// 
     /// If `test_id` maps to an already requested buffer, it's returned back to the caller. Otherwise a new buffer is requested from `blueprint` and `source`, and a new `BufferId` is returned. 
-    pub fn ensure_buffer<S>(&mut self, test_id: BufferId, blueprint: Buffer, source: BufferSource<S>) -> BufferId {
+    pub fn ensure_buffer<S>(&mut self, test_id: BufferId, blueprint: BufferBlueprint, source: BufferSource<S>) -> BufferId {
         if self.is_buffer_requested(&test_id) { return test_id };
         self.request_buffer(blueprint, source)
     }
@@ -135,7 +118,7 @@ impl GpuContext {
     /// Request a texture to be created from the provided blueprint and source.
     /// 
     /// Returns a `TextureId` that is uniquely associated with the resultant wgpu `Texture`.
-    pub fn request_texture(&mut self, blueprint: Texture, source: impl TextureSource) -> TextureId {
+    pub fn request_texture(&mut self, blueprint: TextureBlueprint, source: impl TextureSource) -> TextureId {
         let id = blueprint.create_id();
 
         let policy = blueprint.hold_policy.unwrap_or(self.global_hp.buffers);
@@ -155,7 +138,7 @@ impl GpuContext {
     /// 
     /// The format of resultant texture is `wgpu::TextureFormat::Depth32Float`. 
     pub fn request_depth_texture(&mut self, width: u32, height: u32, hold_policy: Option<HoldPolicy>) -> TextureId {
-        let blueprint = Texture::render_attachment(wgpu::TextureFormat::Depth32Float);
+        let blueprint = TextureBlueprint::render_attachment(wgpu::TextureFormat::Depth32Float);
         let source = Computed { dim: TexDimensions::size_2d(width, height) };
         let id = blueprint.create_id();
 
@@ -175,7 +158,7 @@ impl GpuContext {
     /// Ensures a texture has been requested.
     /// 
     /// If `test_id` maps to an already requested texture, it's returned back to the caller. Otherwise a new texture is requested from `blueprint` and `source`, and a new `TextureId` is returned. 
-    pub fn ensure_texture(&mut self, test_id: TextureId, blueprint: Texture, source: impl TextureSource) -> TextureId {
+    pub fn ensure_texture(&mut self, test_id: TextureId, blueprint: TextureBlueprint, source: impl TextureSource) -> TextureId {
         if self.is_texture_requested(&test_id) { return test_id };
         self.request_texture(blueprint, source)
     }
@@ -223,7 +206,7 @@ impl GpuContext {
     /// Request a pipeline to be created from the provided blueprint.
     /// 
     /// Returns a `PipelineId` that is content-addressable to the blueprint. (This ensures that identical pipeline blueprints map to the same id)
-    pub fn request_pipeline(&mut self, blueprint: impl Into<PipelineType>) -> PipelineId {
+    pub fn request_pipeline(&mut self, blueprint: impl Into<Pipeline>) -> PipelineId {
         return self.pip_registry.request(blueprint.into(), &self.bg_registry, self.global_hp.pipelines);
     }
 

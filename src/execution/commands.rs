@@ -95,9 +95,9 @@ impl DrawCommand {
     /// 
     /// ## PANICS 
     /// 
-    /// If the `CanvasFrame` does not have a depth attachment
-    pub fn standard<'a>(
-        frame: &'a CanvasFrame<'a>, 
+    /// If the `CanvasFrame` does not have a depth attachment matching the `RenderAttachment` implementation.
+    pub fn standard(
+        frame: &CanvasFrame<'_>, 
         clear_color: Option<wgpu::Color>,
         depth_atm: impl RenderAttachment,
         depth_op: DepthLoadOp,
@@ -116,7 +116,7 @@ impl DrawCommand {
     }
 
     /// Create a `DrawCommand` for a standard main pass (with just surface color attachment, no depth)
-    pub fn standard_no_depth<'a>(frame: &'a CanvasFrame<'a>, clear_color: Option<wgpu::Color>) -> Self {
+    pub fn standard_no_depth(frame: &CanvasFrame<'_>, clear_color: Option<wgpu::Color>) -> Self {
         let surface_atm = frame.surface_attachment(clear_color);
         let draw_cmd = DrawCommand::new()
             .with_color_atm(surface_atm);

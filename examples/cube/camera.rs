@@ -1,10 +1,6 @@
-use wgpu_conduit::{Buffer, BufferId, BufferSource, GpuContext, StructuredUpdate};
+use wgpu_conduit::{BufferBlueprint, BufferId, BufferSource, StructuredUpdate};
 
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct CameraUniform {
-    view_proj: [f32; 16]
-}
+use crate::Graphics;
 
 /// A simple 3d camera
 pub struct Camera {
@@ -28,23 +24,27 @@ impl Camera {
     }
 
     /// Initialize this camera
-    pub fn init(&mut self, aspect: f32, context: &mut GpuContext) {
-        self.id = context.request_buffer(
-            Buffer::as_uniform().writable().with_label("camera_uniform"), 
-            BufferSource::from_pod(self.as_uniform(aspect))
+    pub fn init(&mut self, graphics: &mut Graphics) {
+        self.id = graphics.context.request_buffer(
+            BufferBlueprint::as_uniform()
+                .writable()
+                .with_label("camera_uniform"), 
+            BufferSource::from_pod(
+                self.view_proj(graphics.canvas.aspect())
+            )
         );
     }
 
     /// Update this camera
-    pub fn update(&mut self, aspect: f32, context: &mut GpuContext) {
-        let _ = context.update_buffer(&self.id, StructuredUpdate {
-            data: &self.as_uniform(aspect),
+    pub fn update(&mut self, graphics: &mut Graphics) {
+        let _ = graphics.context.update_buffer(&self.id, StructuredUpdate {
+            data: &self.view_proj(graphics.canvas.aspect()),
             offset: 0
         });
     }
 
-    /// Returns this camera as in it's uniform representation
-    pub fn as_uniform(&self, aspect: f32) -> CameraUniform {
+    /// Returns this camera's view-projection matrix
+    pub fn view_proj(&self, aspect: f32) -> glam::Mat4 {
         let view = glam::Mat4::from_translation(self.position).inverse();
         let proj = glam::Mat4::perspective_rh(
             self.fov, 
@@ -53,6 +53,6 @@ impl Camera {
             self.z_far
         );
 
-        CameraUniform { view_proj: (proj * view).to_cols_array() }
+        proj * view
     }
 }

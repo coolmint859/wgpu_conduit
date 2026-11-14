@@ -147,7 +147,7 @@ impl TextureSource for Computed {
 
 /// A blueprint for constructing wgpu textures.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct Texture {
+pub struct TextureBlueprint {
     /// Label for gpu profiling
     pub label: String,
     /// The format of the texture, default is `wgpu::TextureFormat::Rgba8Unorm`
@@ -160,7 +160,7 @@ pub struct Texture {
     pub hold_policy: Option<HoldPolicy>
 }
 
-impl Texture {
+impl TextureBlueprint {
     pub fn new(format: wgpu::TextureFormat) -> Self {
         Self {
             label: "Texture".to_string(),
@@ -257,7 +257,7 @@ impl Texture {
     }
 }
 
-impl GpuResource for Texture {
+impl GpuResource for TextureBlueprint {
     type Id = TextureId;
 
     fn create_id(&self) -> Self::Id {

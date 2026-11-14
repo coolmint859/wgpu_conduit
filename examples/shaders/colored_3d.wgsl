@@ -1,8 +1,4 @@
-struct CameraUniform {
-    view_proj: mat4x4f
-}
-
-@group(0) @binding(0) var<uniform> camera: CameraUniform;
+@group(0) @binding(0) var<uniform> view_proj: mat4x4f;
 @group(0) @binding(1) var<uniform> model_mat: mat4x4f;
 
 struct VertexInput {
@@ -18,7 +14,7 @@ struct VertexOutput {
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
-    output.position = camera.view_proj * model_mat * vec4f(input.position, 1.0);
+    output.position = view_proj * model_mat * vec4f(input.position, 1.0);
     output.color = input.color;
     return output;
 }

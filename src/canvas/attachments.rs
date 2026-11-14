@@ -1,14 +1,14 @@
-use crate::{Computed, GpuContext, TexDimensions, Texture, TextureHandle};
+use crate::{Computed, GpuContext, TexDimensions, TextureBlueprint, TextureHandle};
 
-/// Represents color and depth attachments onto a `Canvas`, when added to a `GraphicsInit` struct.
+/// Represents color and depth attachments onto a `Canvas`.
 pub trait RenderAttachment {
     /// The name for the attachment. 
     /// 
-    /// This is used as the key to query the Canvas for attachments during runtime to use in `Pipeline`s and `DrawCommand`s.
+    /// This is used to query the Canvas for attachments during runtime to use in `Pipeline`s and `DrawCommand`s.
     fn name(&self) -> &str;
 
     /// Converts `self` into a static `AttachmentConfig`.
-    fn into_config(self) -> AttachmentConfig;
+    fn into_config(self) -> RenderAttachmentConfig;
 }
 
 /// A standard depth attachment with format `Depth32Float`
@@ -18,10 +18,11 @@ pub struct StandardDepth;
 impl RenderAttachment for StandardDepth {
     fn name(&self) -> &str { "depth_atm" }
 
-    fn into_config(self) -> AttachmentConfig {
-        AttachmentConfig {
-            blueprint: Texture::render_attachment(wgpu::TextureFormat::Depth32Float).with_label(self.name()),
-            dims: AttachmentDimensions::Canvas,
+    fn into_config(self) -> RenderAttachmentConfig {
+        RenderAttachmentConfig {
+            blueprint: TextureBlueprint::render_attachment(wgpu::TextureFormat::Depth32Float).with_label(self.name()),
+            dims: RenderAttachmentDimensions::Canvas,
+            format: wgpu::TextureFormat::Depth32Float
         }
     }
 }
@@ -34,16 +35,18 @@ impl RenderAttachment for StandardDepth {
 /// 
 /// In the case the texture data is *not* created on the gpu, it's recommended to use a storage texture instead as that is better supported in that case than with render attachments.
 #[derive(Debug, Clone)]
-pub struct AttachmentConfig {
+pub struct RenderAttachmentConfig {
     /// The attachment texture blueprint. This is used in the creation of the underlying texture that the attachment represents.
     /// 
     /// All attachments created needs to have at least the `RENDER_ATTACHMENT` usage flag set. `Texture::render_attachment()` can be called to set this usage flag for you.
-    pub blueprint: Texture,
+    pub blueprint: TextureBlueprint,
     /// The dimensions of the attachment. This is used to determine how large the attachment should be when created, as well as how it should be resized when the canvas is resized.
-    pub dims: AttachmentDimensions,
+    pub dims: RenderAttachmentDimensions,
+    /// The format of the attachment texture.
+    pub format: wgpu::TextureFormat,
 }
 
-impl AttachmentConfig {
+impl RenderAttachmentConfig {
     /// Creates a new texture handle from this config's blueprint with the provided dimensions.
     pub(crate) fn create_handle(&self, width: u32, height: u32, context: &GpuContext) -> TextureHandle {
         let dim = self.dims.as_tex_dims(width, height);
@@ -57,7 +60,7 @@ impl AttachmentConfig {
 
 /// Defines how a render attachment should be resized when the canvas resizes.
 #[derive(Debug, Clone, Copy)]
-pub enum AttachmentDimensions {
+pub enum RenderAttachmentDimensions {
     /// Attachment dimensions are the same as the canvas.
     /// 
     /// If the canvas is resized, the attachment is resized to match.
@@ -72,17 +75,17 @@ pub enum AttachmentDimensions {
     Scaled(f32)
 }
 
-impl AttachmentDimensions {
+impl RenderAttachmentDimensions {
     /// Converts `self` into texture dimensions as used when requesting a texture through the `GpuContext`. Does not consume `self`
     pub(crate) fn as_tex_dims(&self, canvas_width: u32, canvas_height: u32) -> TexDimensions {
         match self {
-            AttachmentDimensions::Canvas => { 
+            RenderAttachmentDimensions::Canvas => { 
                 TexDimensions::size_2d(canvas_width, canvas_height) 
             }
-            AttachmentDimensions::Fixed { width, height } => {
+            RenderAttachmentDimensions::Fixed { width, height } => {
                 TexDimensions::size_2d(*width, *height)
             }
-            AttachmentDimensions::Scaled(scale) => {
+            RenderAttachmentDimensions::Scaled(scale) => {
                 let width = (canvas_width as f32 / scale) as u32;
                 let height = (canvas_height as f32 / scale) as u32;
 
@@ -93,28 +96,29 @@ impl AttachmentDimensions {
 }
 
 /// Render attachment texture and config, used for pipelines and during render passes.
-pub(crate) struct AttachmentRecord {
+#[derive(Debug)]
+pub(crate) struct RenderAttachmentRecord {
     /// The handle to the wgpu texture, view, and extent
     pub(crate) tex: TextureHandle,
     /// configuration of how the recreate the texture during resizing
-    pub(crate) config: AttachmentConfig,
+    pub(crate) config: RenderAttachmentConfig,
 }
 
-impl AttachmentRecord {
+impl RenderAttachmentRecord {
     /// Resizes the attachment texture if the dimensions are not fixed.
-    pub(crate) fn resize(&mut self, canvas_width: u32, canvas_height: u32, context: &mut GpuContext) {
+    pub(crate) fn resize(&mut self, canvas_width: u32, canvas_height: u32, context: &GpuContext) {
         match self.config.dims {
-            AttachmentDimensions::Canvas => {
+            RenderAttachmentDimensions::Canvas => {
                 self.tex = self.config.create_handle(canvas_width, canvas_height, context);
             },
-            AttachmentDimensions::Scaled(scale) => {
+            RenderAttachmentDimensions::Scaled(scale) => {
                 let width = (canvas_width as f32 / scale) as u32;
                 let height = (canvas_height as f32 / scale) as u32;
 
                 self.tex = self.config.create_handle(width, height, context)
             },
             // fixed attachments are never resized
-            AttachmentDimensions::Fixed {..} => {}
+            RenderAttachmentDimensions::Fixed {..} => {}
         }
     }
 }

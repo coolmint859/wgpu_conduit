@@ -1,11 +1,16 @@
 use std::{sync::Arc, time::Instant};
 
-use wgpu_conduit::{DepthLoadOp, DrawCommand, Graphics, MultiBufferExecutor, StandardDepth, gpu::GraphicsInit};
+use wgpu_conduit::{Canvas, DepthLoadOp, DrawCommand, GpuContext, MultiBufferExecutor, StandardDepth};
 use winit::{application::ApplicationHandler, dpi::{PhysicalSize, Size}, event::WindowEvent, event_loop::{ActiveEventLoop, ControlFlow, EventLoop}, keyboard::{KeyCode, PhysicalKey}, window::{WindowAttributes, WindowId}};
 
 mod cube;
 mod camera;
 use crate::{camera::Camera, cube::Cube};
+
+pub struct Graphics {
+    pub context: GpuContext,
+    pub canvas: Canvas
+}
 
 pub struct App {
     graphics: Option<Graphics>,
@@ -27,7 +32,7 @@ impl App {
 
     pub fn resize(&mut self, width: u32, height: u32) {
         if let Some(graphics) = &mut self.graphics {
-            graphics.resize_canvas(width, height);
+            graphics.canvas.resize(width, height, &graphics.context);
         }
     }
 
@@ -53,7 +58,7 @@ impl App {
 }
 
 impl ApplicationHandler for App {
-    fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let window_attrs = WindowAttributes::default()
             .with_title("Hello, Cube! Press T to Toggle Cube Texture Rendering")
             .with_inner_size(Size::Physical(PhysicalSize { 
@@ -64,13 +69,19 @@ impl ApplicationHandler for App {
             event_loop.create_window(window_attrs).unwrap()
         );
 
-        let mut graphics = GraphicsInit::new()
+        let context = GpuContext::builder()
             .with_backend(wgpu::Backends::DX12)
-            .with_depth_attachment(StandardDepth)
-            .init_blocking(window)
-            .expect("Failed to initialize graphics environment");
+            .init_blocking()
+            .expect("Failed to initialize gpu context");
 
-        self.camera.init(graphics.canvas.aspect(), &mut graphics.context);
+        let canvas = Canvas::builder()
+            .with_attachment(StandardDepth)
+            .init(window, &context)
+            .expect("Failed to initialize rendering canvas");
+        
+        let mut graphics = Graphics { context, canvas };
+        
+        self.camera.init(&mut graphics);
 
         let cube = Cube::new(&mut graphics, self.camera.id);
         self.cube = Some(cube);
@@ -86,11 +97,11 @@ impl ApplicationHandler for App {
         let dt = (current_time - self.previous_time).as_secs_f32();
         self.previous_time = current_time;
 
-        self.camera.update(graphics.canvas.aspect(), &mut graphics.context);
-        cube.update(dt, &mut graphics.context);
+        self.camera.update(graphics);
+        cube.update(dt, graphics);
 
-        graphics.sync_context();
-        graphics.request_redraw();
+        graphics.context.sync();
+        graphics.canvas.request_redraw();
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {

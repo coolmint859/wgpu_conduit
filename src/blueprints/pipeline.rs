@@ -110,51 +110,51 @@ impl Compute {
 
 /// The type of gpu pipeline. This is used internally by the context to create the underlying wgpu pipelines
 #[derive(Clone, Debug)]
-pub enum PipelineType {
-    Render(Pipeline<Render>),
-    Compute(Pipeline<Compute>)
+pub enum Pipeline {
+    Render(PipelineBlueprint<Render>),
+    Compute(PipelineBlueprint<Compute>)
 }
 
-impl PipelineType {
+impl Pipeline {
     /// Get the bind group layouts associated with the pipeline
     pub fn bg_layouts(&self) -> &Vec<LayoutId> {
         return match self {
-            PipelineType::Render(pip) => {
+            Pipeline::Render(pip) => {
                 &pip.bg_layouts
             }
-            PipelineType::Compute(pip) => {
+            Pipeline::Compute(pip) => {
                 &pip.bg_layouts
             }
         }
     }
 }
 
-impl From<Pipeline<Render>> for PipelineType {
-    fn from(pip: Pipeline<Render>) -> Self {
+impl From<PipelineBlueprint<Render>> for Pipeline {
+    fn from(pip: PipelineBlueprint<Render>) -> Self {
         Self::Render(pip)
     }
 }
 
-impl From<Pipeline<Compute>> for PipelineType {
-    fn from(pip: Pipeline<Compute>) -> Self {
+impl From<PipelineBlueprint<Compute>> for Pipeline {
+    fn from(pip: PipelineBlueprint<Compute>) -> Self {
         Self::Compute(pip)
     }
 }
 
-impl GpuResource for PipelineType {
+impl GpuResource for Pipeline {
     type Id = PipelineId;
 
     fn create_id(&self) -> Self::Id {
         return match self {
-            PipelineType::Compute(pip) => pip.create_id(),
-            PipelineType::Render(pip) => pip.create_id(),
+            Pipeline::Compute(pip) => pip.create_id(),
+            Pipeline::Render(pip) => pip.create_id(),
         }
     }
 }
 
 /// A blueprint for constructing render and compute pipelines
 #[derive(Clone, Debug, Hash)]
-pub struct Pipeline<T: Hash> {
+pub struct PipelineBlueprint<T: Hash> {
     pub label: String,
     pub bg_layouts: Vec<LayoutId>,
     pub shader: ShaderSource,
@@ -162,7 +162,7 @@ pub struct Pipeline<T: Hash> {
     pub ty: T,
 }
 
-impl<T: Hash> Pipeline<T> {
+impl<T: Hash> PipelineBlueprint<T> {
     /// Set the label for gpu profiling of the resultant render pipeline
     pub fn with_label(mut self, label: &str) -> Self {
         self.label = label.to_string();
@@ -182,7 +182,7 @@ impl<T: Hash> Pipeline<T> {
     }
 }
 
-impl<T: Hash> GpuResource for Pipeline<T> {
+impl<T: Hash> GpuResource for PipelineBlueprint<T> {
     type Id = PipelineId;
 
     fn create_id(&self) -> Self::Id {
@@ -192,7 +192,7 @@ impl<T: Hash> GpuResource for Pipeline<T> {
     }
 }
 
-impl Pipeline<Render> {
+impl PipelineBlueprint<Render> {
     /// Create a new render pipeline.
     pub fn as_render(shader: ShaderSource) -> Self {
         Self {
@@ -266,7 +266,7 @@ impl Pipeline<Render> {
     }
 }
 
-impl Pipeline<Compute> {
+impl PipelineBlueprint<Compute> {
     /// Create a new compute pipeline
     pub fn as_compute(shader: ShaderSource) -> Self {
         Self {

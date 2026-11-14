@@ -4,22 +4,36 @@ use wgpu::util::DeviceExt;
 
 use crate::{context::BindGroupLayoutHandle, blueprints::*};
 
-/// Handle to the gpu device and queue
-#[derive(Clone, Debug)]
+/// A lightweight handle to core wgpu primitives, including the instance, adapter, device and queue.
+/// 
+/// This is the core struct used by the `GpuContext` to create resources.
+/// 
+/// While it's possible to use this to create resources directly, it's not recommended as the execution layer relies heavily
+/// on the `GpuContext` and id system. Bind group and pipeline blueprints also rely heavily on the id system. All blueprints are capable of producing ids to their corresponding resources,
+/// so creating the ids directly is feasible, but it's not the intended usage. You would need to handle the mapping of the ids to the resources yourself.
+/// 
+/// All in all, only use this directly to create resources if you're planning on handling the resource storage and execution layer yourself.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct GpuHandle {
+    pub instance: wgpu::Instance,
+    pub adapter: wgpu::Adapter,
     pub device: wgpu::Device,
-    pub queue: wgpu::Queue
+    pub queue: wgpu::Queue,
 }
 
 impl GpuHandle {
+    pub fn limits(&self) -> wgpu::Limits {
+        self.adapter.limits()
+    }
+
     /// Create a buffer from the given configuration builder
-    pub fn create_buffer(&self, blueprint: Buffer, init_data: Option<Vec<u8>>, capacity: u64) -> Result<wgpu::Buffer, String> {
+    pub fn create_buffer(&self, blueprint: BufferBlueprint, init_data: Option<Vec<u8>>, capacity: u64) -> Result<wgpu::Buffer, String> {
         let payload = blueprint.into_payload(init_data, capacity);
 
         let buffer = if let Some(data) = payload.init_data {
             self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&payload.label),
-                contents: &Buffer::extend_bytes(data, capacity as usize),
+                contents: &BufferBlueprint::extend_bytes(data, capacity as usize),
                 usage: payload.usage
             })
         } else {
@@ -37,7 +51,7 @@ impl GpuHandle {
     }
 
     /// Create a new texture from the given configuration builder
-    pub fn create_texture(&self, blueprint: Texture, source: impl TextureSource) -> Result<TextureHandle, String> {
+    pub fn create_texture(&self, blueprint: TextureBlueprint, source: impl TextureSource) -> Result<TextureHandle, String> {
         let tex_data = match source.into_data(blueprint.format) {
             Ok(data) => data,
             Err(e) => {
@@ -131,7 +145,7 @@ impl GpuHandle {
     /// Create a new render pipeline from the given configuration builder
     pub fn create_render_pipeline(
         &self,
-        blueprint: Pipeline<Render>,
+        blueprint: PipelineBlueprint<Render>,
         bg_layouts: Vec<wgpu::BindGroupLayout>
     ) -> Result<PipelineHandle, String> {
         let shader_source = match blueprint.shader {
@@ -201,7 +215,7 @@ impl GpuHandle {
 
     pub fn create_compute_pipeline(
         &self, 
-        blueprint: Pipeline<Compute>,
+        blueprint: PipelineBlueprint<Compute>,
         bg_layouts: Vec<wgpu::BindGroupLayout>
     ) -> Result<PipelineHandle, String> {
         let shader_source = match blueprint.shader {

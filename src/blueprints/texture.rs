@@ -6,16 +6,10 @@ use uuid::Uuid;
 
 use crate::context::*;
 
-pub struct TextureData {
-    pub data: Option<Vec<u8>>,
-    pub dim: TexDimensions,
-    pub format: wgpu::TextureFormat
-}
-
 /// A lightweight handle to a gpu texture
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct TextureHandle {
-    /// The Handle to the actual wgpu `Texture`
+    /// The handle to the actual wgpu `Texture`
     pub texture: wgpu::Texture,
     /// The view into the associated wgpu `Texture`
     pub view: wgpu::TextureView,
@@ -33,14 +27,14 @@ impl Deref for TextureHandle {
 
 /// Specifies the dimensions of a texture
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct TexDimensions {
+pub struct TextureDimensions {
     pub width: u32,
     pub height: u32, 
     pub depth: u32,
     pub wgpu_dim: wgpu::TextureDimension
 }
 
-impl TexDimensions {
+impl TextureDimensions {
     /// A 2D texture
     pub fn size_2d(width: u32, height: u32) -> Self {
         Self {
@@ -60,35 +54,68 @@ impl TexDimensions {
             wgpu_dim: wgpu::TextureDimension::D3
         }
     }
+
+    /// Returns `self` as a `wgpu::Extent3d`
+    pub fn as_extent(&self) -> wgpu::Extent3d {
+        wgpu::Extent3d {
+            width: self.width,
+            height: self.height,
+            depth_or_array_layers: self.depth,
+        }
+    }
 }
 
 /// Represents sources for textures, condensing the blueprint into a payload for use during uploading.
 pub trait TextureSource: Send + 'static {
     /// Converts `self` into the raw texture data and dimensions given a `format`, if possible.
-    fn into_data(self, format: wgpu::TextureFormat) -> Result<TextureData, String>;
+    fn into_info(self) -> Result<TextureSourceInfo, String>;
+}
+
+/// Texture source information for creating `wgpu::Textures`
+pub struct TextureSourceInfo {
+    /// Initial texture data. Must match exactly the dimensions and format of the accompanying blueprint.
+    /// If `None`, the texture will be initialized with the default values (usually 0s) according the blueprint format.
+    pub init_data: Option<Vec<u8>>,
+    /// The dimensions of the texture. 
+    /// 
+    /// If `init_data` is `Some(Vec<u8>)`, the dimensions and format must combine to be exactly equal to the length of the byte data.
+    pub dim: TextureDimensions,
+    /// The format of the texture. 
+    /// 
+    /// If `init_data` is `Some(Vec<u8>)`, the dimensions and format must combine to be exactly equal to the length of the byte data.
+    pub format: wgpu::TextureFormat,
+}
+
+// allows source info struct to be provided directly.
+impl TextureSource for TextureSourceInfo {
+    fn into_info(self) -> Result<TextureSourceInfo, String> {
+        Ok(self)
+    }
 }
 
 /// A `TextureSource` for textures created from image data
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct OnDisk {
     /// The path to the image data
-    pub path: &'static str 
+    pub path: &'static str,
+    /// The format of the texture.
+    pub format: wgpu::TextureFormat,
 }
 
 impl TextureSource for OnDisk {
-    fn into_data(self, format: wgpu::TextureFormat) -> Result<TextureData, String> {
+    fn into_info(self) -> Result<TextureSourceInfo, String> {
         match image::open(self.path)
             .map_err(|err| format!("Failed to read image file with path {}: {}", self.path, err)) 
         {
             Ok(img) => {
-                let dim = TexDimensions {
+                let dim = TextureDimensions {
                     width: img.width(),
                     height: img.height(),
                     depth: 1,
                     wgpu_dim: wgpu::TextureDimension::D2
                 };
 
-                let raw_data = match format {
+                let raw_data = match self.format {
                     wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb => {
                         img.to_bgra8().into_raw()
                     },
@@ -100,15 +127,15 @@ impl TextureSource for OnDisk {
                     }
                     _ => {
                         return Err(format!(
-                            "Unsupported Texture Format {:?} for image data from path @'{}'", format, self.path
+                            "Unsupported Texture Format {:?} for image data from path @'{}'", self.format, self.path
                         ));
                     }
                 };
 
-                Ok(TextureData {
-                    data: Some(raw_data),
+                Ok(TextureSourceInfo {
+                    init_data: Some(raw_data),
                     dim,
-                    format
+                    format: self.format
                 })
             },
             Err(e) => return Err(e)
@@ -116,19 +143,26 @@ impl TextureSource for OnDisk {
     }
 }
 
-
 /// A `TextureSource` for textures created from procedural generation
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct Procedural { 
     /// The procedurally generated texture data. Must match the dimensions
     pub data: Vec<u8>,
     /// The dimensions (width/height/depth) of the texture data
-    pub dim: TexDimensions,
+    pub dim: TextureDimensions,
+    /// The format of the texture. 
+    /// 
+    /// The dimensions and format must combine to be exactly equal to the length of the byte data.
+    pub format: wgpu::TextureFormat,
 }
 
 impl TextureSource for Procedural {
-    fn into_data(self, format: wgpu::TextureFormat) -> Result<TextureData, String> {
-        Ok(TextureData { data: Some(self.data), dim: self.dim, format })
+    fn into_info(self) -> Result<TextureSourceInfo, String> {
+        Ok(TextureSourceInfo { 
+            init_data: Some(self.data), 
+            dim: self.dim, 
+            format: self.format
+        })
     }
 }
 
@@ -136,12 +170,18 @@ impl TextureSource for Procedural {
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct Computed {
     /// The dimensions (width/height/depth) of the output from the compute shader
-    pub dim: TexDimensions
+    pub dim: TextureDimensions,
+    /// The format of the texture.
+    pub format: wgpu::TextureFormat,
 }
 
 impl TextureSource for Computed {
-    fn into_data(self, format: wgpu::TextureFormat) -> Result<TextureData, String> {
-        Ok(TextureData { data: None, dim: self.dim, format })
+    fn into_info(self) -> Result<TextureSourceInfo, String> {
+        Ok(TextureSourceInfo { 
+            init_data: None, 
+            dim: self.dim, 
+            format: self.format
+        })
     }
 }
 
@@ -150,8 +190,6 @@ impl TextureSource for Computed {
 pub struct TextureBlueprint {
     /// Label for gpu profiling
     pub label: String,
-    /// The format of the texture, default is `wgpu::TextureFormat::Rgba8Unorm`
-    pub format: wgpu::TextureFormat,
     /// The usage of the texture, default is `wgpu::TextureUsages::TEXTURE_BINDING`
     pub usage: wgpu::TextureUsages,
     /// The mip levels of the texture, default is 1.
@@ -161,10 +199,9 @@ pub struct TextureBlueprint {
 }
 
 impl TextureBlueprint {
-    pub fn new(format: wgpu::TextureFormat) -> Self {
+    pub fn new() -> Self {
         Self {
             label: "Texture".to_string(),
-            format,
             usage: wgpu::TextureUsages::TEXTURE_BINDING,
             mip_levels: 1,
             hold_policy: None,
@@ -172,10 +209,9 @@ impl TextureBlueprint {
     }
 
     /// Create a texture blueprint configured as a render attachment
-    pub fn render_attachment(format: wgpu::TextureFormat) -> Self {
+    pub fn render_attachment() -> Self {
         Self {
             label: "depth texture".to_string(),
-            format,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             mip_levels: 1,
             hold_policy: None
@@ -191,12 +227,6 @@ impl TextureBlueprint {
     /// Set the hold policy for this sampler. This overrides the global policy.
     pub fn with_hold_policy(mut self, policy: HoldPolicy) -> Self {
         self.hold_policy = Some(policy);
-        self
-    }
-
-    /// Set the format of the texture
-    pub fn with_format(mut self, format: wgpu::TextureFormat) -> Self {
-        self.format = format;
         self
     }
 
@@ -243,18 +273,6 @@ impl TextureBlueprint {
         self.usage |= wgpu::TextureUsages::TEXTURE_BINDING;
         self
     }
-
-    /// Convert this texture blueprint into it's payload representation, given some initial data and dimensions.
-    pub(crate) fn into_payload(&self, data: Option<Vec<u8>>, dim: TexDimensions) -> TexturePayload {
-        TexturePayload {
-            label: self.label.clone(),
-            format: self.format,
-            usage: self.usage,
-            mip_levels: self.mip_levels,
-            size: dim,
-            data
-        }
-    }
 }
 
 impl GpuResource for TextureBlueprint {
@@ -265,27 +283,17 @@ impl GpuResource for TextureBlueprint {
     }
 }
 
-/// Condensed version of a texture blueprint. Used to streamline the creation of the corresponding wgpu texture
-pub struct TexturePayload {
-    pub label: String,
-    pub format: wgpu::TextureFormat,
-    pub usage: wgpu::TextureUsages,
-    pub size: TexDimensions, 
-    pub mip_levels: u32,
-    pub data: Option<Vec<u8>>,
-}
-
-impl TexturePayload {
+pub mod texture_utils {
     /// Determine the number of bytes per pixel based on the currently set format
-    pub(crate) fn bytes_per_pixel(&self) -> u32 {
-        match self.format {
+    pub fn bytes_per_pixel(format: wgpu::TextureFormat) -> u32 {
+        match format {
             wgpu::TextureFormat::R8Unorm | wgpu::TextureFormat::R8Snorm => 1,
             wgpu::TextureFormat::Rg8Unorm | wgpu::TextureFormat::Rg8Snorm => 2,
             wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb | wgpu::TextureFormat::Bgra8UnormSrgb => 4,
             wgpu::TextureFormat::R32Float => 4,
             wgpu::TextureFormat::Rgba16Float => 8,
             wgpu::TextureFormat::Rgba32Float => 16,
-            _ => panic!("Unsupported texture format for automatic layout calculation: {:?}", self.format),
+            _ => panic!("Unsupported texture format for automatic layout calculation: {:?}", format),
         }
     }
 }

@@ -87,7 +87,7 @@ impl FrameBuffer {
         let record = self.attachments.get(name)?;
 
         Some(wgpu::ColorTargetState {
-            format: record.config.blueprint.format,
+            format: record.config.format,
             blend,
             write_mask: write
         })
@@ -104,7 +104,7 @@ impl FrameBuffer {
         let record = self.attachments.get(name)?;
 
         Some(wgpu::DepthStencilState {
-            format: record.config.blueprint.format,
+            format: record.config.format,
             depth_compare: compare,
             depth_write_enabled: write_enabled,
             stencil: wgpu::StencilState::default(),

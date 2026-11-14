@@ -119,12 +119,8 @@ impl Pipeline {
     /// Get the bind group layouts associated with the pipeline
     pub fn bg_layouts(&self) -> &Vec<LayoutId> {
         return match self {
-            Pipeline::Render(pip) => {
-                &pip.bg_layouts
-            }
-            Pipeline::Compute(pip) => {
-                &pip.bg_layouts
-            }
+            Pipeline::Render(pip) => &pip.bg_layouts,
+            Pipeline::Compute(pip) => &pip.bg_layouts,
         }
     }
 }
@@ -194,7 +190,7 @@ impl<T: Hash> GpuResource for PipelineBlueprint<T> {
 
 impl PipelineBlueprint<Render> {
     /// Create a new render pipeline.
-    pub fn as_render(shader: ShaderSource) -> Self {
+    pub fn render(shader: ShaderSource) -> Self {
         Self {
             label: "render_pipeline".to_string(),
             bg_layouts: Vec::new(),
@@ -217,7 +213,9 @@ impl PipelineBlueprint<Render> {
         self
     }
 
-    /// Add a vertex layout to the rendering pipeline. A corresponding buffer must be added to the render pass
+    /// Add a vertex layout to the rendering pipeline. 
+    /// 
+    /// A corresponding buffer must be added to the `DrawCall` implementation using the pipeline
     pub fn with_vertex_layout<V: VertexLayout>(mut self) -> Self {
         self.ty.vertex_layouts.push(V::into_layout());
         self
@@ -248,19 +246,21 @@ impl PipelineBlueprint<Render> {
     }
 
     /// Configure the pipeline to consider front faces to be in counter-clockwise winding order.
+    /// 
+    /// This is the default winding order for render pipelines
     pub fn with_ccw_winding(mut self) -> Self {
         self.ty.primitive_state.front_face = wgpu::FrontFace::Ccw;
         self
     }
 
     /// Configure the pipeline to cull back faces
-    pub fn with_back_culling(mut self) -> Self {
+    pub fn with_backface_culling(mut self) -> Self {
         self.ty.primitive_state.cull_mode = Some(wgpu::Face::Back);
         self
     }
 
     /// Configure the pipeline to cull front faces
-    pub fn with_front_culling(mut self) -> Self {
+    pub fn with_frontface_culling(mut self) -> Self {
         self.ty.primitive_state.cull_mode = Some(wgpu::Face::Front);
         self
     }
@@ -268,7 +268,7 @@ impl PipelineBlueprint<Render> {
 
 impl PipelineBlueprint<Compute> {
     /// Create a new compute pipeline
-    pub fn as_compute(shader: ShaderSource) -> Self {
+    pub fn compute(shader: ShaderSource) -> Self {
         Self {
             label: "compute_pipeline".to_string(),
             bg_layouts: Vec::new(),

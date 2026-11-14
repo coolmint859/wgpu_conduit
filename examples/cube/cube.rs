@@ -1,4 +1,4 @@
-use wgpu_conduit::{BindGroupBlueprint, BindGroupIdPair, BufferBinding, BufferBlueprint, BufferId, BufferSource, DrawCommand, IndexedDraw, PipelineBlueprint, PipelineId, Procedural, SampledTextureOptions, Sampler, SamplerBinding, ShaderSource, StandardDepth, StructuredUpdate, TexDimensions, TextureBinding, TextureBlueprint, VertexBufferLayout, VertexLayout};
+use wgpu_conduit::{BindGroupBlueprint, BindGroupIdPair, BufferBinding, BufferBlueprint, BufferId, BufferSource, DrawCommand, IndexedDraw, PipelineBlueprint, PipelineId, Procedural, SampledTextureOptions, SamplerBinding, SamplerBlueprint, ShaderSource, StandardDepth, StructuredUpdate, TextureBinding, TextureBlueprint, TextureDimensions, VertexBufferLayout, VertexLayout};
 
 use crate::Graphics;
 
@@ -46,7 +46,7 @@ pub struct Cube {
 impl Cube {
     pub fn new(graphics: &mut Graphics, cam_id: BufferId) -> Self {
         let model_mat = graphics.context.request_buffer(
-            BufferBlueprint::as_uniform().writable().with_label("model_matrix"),
+            BufferBlueprint::uniform().writable().with_label("model_matrix"),
             BufferSource::from_pod(glam::Mat4::default())
         );
 
@@ -98,19 +98,19 @@ impl ColoredCube {
     pub fn new(graphics: &mut Graphics, cam_id: BufferId, model_mat: BufferId) -> Self {
         let (vertices, indices) = create_colored_vertices();
         let vt_buffer = graphics.context.request_buffer(
-            BufferBlueprint::as_vertex().with_label("cube_colored_vertices"), 
+            BufferBlueprint::vertex().with_label("cube_colored_vertices"), 
             BufferSource::from_vec(vertices)
         );
 
         let idx_buffer = graphics.context.request_buffer(
-            BufferBlueprint::as_index().with_label("cube_colored_indices"),
+            BufferBlueprint::index().with_label("cube_colored_indices"),
             BufferSource::from_vec(indices)
         );
 
         let bg = graphics.context.request_bind_group(
             BindGroupBlueprint::new()
-                .with_entry(BufferBinding::as_uniform(cam_id))
-                .with_entry(BufferBinding::as_uniform(model_mat))
+                .with_entry(BufferBinding::uniform(cam_id))
+                .with_entry(BufferBinding::uniform(model_mat))
                 .with_label("cube_color_bg")
         );
 
@@ -122,12 +122,12 @@ impl ColoredCube {
         );
 
         let pipeline = graphics.context.request_pipeline(
-            PipelineBlueprint::as_render(shader)
+            PipelineBlueprint::render(shader)
                 .with_label("cube_colored_pip")
                 .with_bg_layouts(&[bg.layout_id])
                 .with_vertex_layout::<ColorVertex>()
                 .with_depth_state(depth_state)
-                .with_back_culling()
+                .with_backface_culling()
         );
 
         Self {
@@ -160,40 +160,41 @@ impl TexturedCube {
     pub fn new(graphics: &mut Graphics, cam_id: BufferId, model_mat: BufferId) -> Self {
         let (vertices, indices) = create_textured_vertices();
         let vt_buffer = graphics.context.request_buffer(
-            BufferBlueprint::as_vertex().with_label("cube_colored_vertices"), 
+            BufferBlueprint::vertex().with_label("cube_colored_vertices"), 
             BufferSource::from_vec(vertices)
         );
 
         let idx_buffer = graphics.context.request_buffer(
-            BufferBlueprint::as_index().with_label("cube_colored_indices"),
+            BufferBlueprint::index().with_label("cube_colored_indices"),
             BufferSource::from_vec(indices)
         );
 
         let tex = graphics.context.request_texture(
-            TextureBlueprint::new(wgpu::TextureFormat::Rgba8Unorm)
+            TextureBlueprint::new()
                 .with_label("proc_texture")
                 .writable(),
             Procedural { 
                 // grey/magenta checkboard
                 data: vec![
                     127, 127, 127, 255,
-                    255, 255, 0, 255,
-                    255, 255, 0, 255,
+                    255, 0, 255, 255,
+                    255, 0, 255, 255,
                     127, 127, 127, 255,
                 ], 
-                dim: TexDimensions::size_2d(2, 2)
+                dim: TextureDimensions::size_2d(2, 2),
+                format: wgpu::TextureFormat::Rgba8Unorm
             }
         );
 
         let samp = graphics.context.request_sampler(
-            Sampler::nearest().with_label("cube_sampler")
+            SamplerBlueprint::nearest().with_label("cube_sampler")
         );
 
         let bg = graphics.context.request_bind_group(
             BindGroupBlueprint::new()
                 .with_label("cube_textured_bg")
-                .with_entry(BufferBinding::as_uniform(cam_id))
-                .with_entry(BufferBinding::as_uniform(model_mat))
+                .with_entry(BufferBinding::uniform(cam_id))
+                .with_entry(BufferBinding::uniform(model_mat))
                 .with_entry(TextureBinding::as_sampled(tex, SampledTextureOptions::nonfilterable()))
                 .with_entry(SamplerBinding::non_filtering(samp))
         );
@@ -206,12 +207,12 @@ impl TexturedCube {
         );
 
         let pipeline = graphics.context.request_pipeline(
-            PipelineBlueprint::as_render(shader)
+            PipelineBlueprint::render(shader)
                 .with_label("cube_textured_pip")
                 .with_bg_layouts(&[bg.layout_id])
                 .with_vertex_layout::<TextureVertex>()
                 .with_depth_state(depth_state)
-                .with_back_culling()
+                .with_backface_culling()
         );
 
         Self {

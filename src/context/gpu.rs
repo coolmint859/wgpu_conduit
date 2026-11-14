@@ -27,58 +27,55 @@ impl GpuHandle {
     }
 
     /// Create a buffer from the given configuration builder
-    pub fn create_buffer(&self, blueprint: BufferBlueprint, init_data: Option<Vec<u8>>, capacity: u64) -> Result<wgpu::Buffer, String> {
-        let payload = blueprint.into_payload(init_data, capacity);
+    pub fn create_buffer(&self, blueprint: BufferBlueprint, source: BufferSource) -> Result<wgpu::Buffer, String> {
+        let alignment = blueprint.alignment.unwrap_or(4);
+        let capacity = buffer_utils::align(source.capacity, alignment);
 
-        let buffer = if let Some(data) = payload.init_data {
+        let buffer = if let Some(data) = source.data {
             self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&payload.label),
+                label: Some(&blueprint.label),
                 contents: &BufferBlueprint::extend_bytes(data, capacity as usize),
-                usage: payload.usage
+                usage: blueprint.usage
             })
         } else {
             self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(&payload.label),
-                size: payload.capacity,
-                usage: payload.usage,
+                label: Some(&blueprint.label),
+                size: source.capacity,
+                usage: blueprint.usage,
                 mapped_at_creation: false
             })
         };
 
-        println!("[GpuContext] Created new buffer with label '{}'", payload.label);
+        println!("[GpuContext] Created new buffer with label '{}'", blueprint.label);
 
         Ok(buffer)
     }
 
     /// Create a new texture from the given configuration builder
     pub fn create_texture(&self, blueprint: TextureBlueprint, source: impl TextureSource) -> Result<TextureHandle, String> {
-        let tex_data = match source.into_data(blueprint.format) {
+        let tex_info = match source.into_info() {
             Ok(data) => data,
             Err(e) => {
                 println!("An error occurred when getting texture data: {e}");
                 return Err(e);
             }
         };
-        let tex_payload = blueprint.into_payload(tex_data.data, tex_data.dim);
 
-        let extent = wgpu::Extent3d {
-            width: tex_payload.size.width,
-            height: tex_payload.size.height,
-            depth_or_array_layers: tex_payload.size.depth
-        };
-        
+        let extent = tex_info.dim.as_extent();
+
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some(&tex_payload.label),
+            label: Some(&blueprint.label),
+            dimension: tex_info.dim.wgpu_dim,
             size: extent,
-            mip_level_count: tex_payload.mip_levels,
+            mip_level_count: blueprint.mip_levels,
             sample_count: 1,
-            dimension: tex_payload.size.wgpu_dim,
-            format: tex_payload.format,
-            usage: tex_payload.usage,
+            format: tex_info.format,
+            usage: blueprint.usage,
             view_formats: &[],
         });
 
-        if let Some(data) = &tex_payload.data {
+        if let Some(data) = &tex_info.init_data {
+            let pix_bytes = texture_utils::bytes_per_pixel(tex_info.format);
             self.queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
                     texture: &texture,
@@ -89,8 +86,8 @@ impl GpuHandle {
                 data,
                 wgpu::TexelCopyBufferLayout {
                     offset: 0,
-                    bytes_per_row: Some(tex_payload.bytes_per_pixel() * tex_payload.size.width),
-                    rows_per_image: Some(tex_payload.size.height)
+                    bytes_per_row: Some(pix_bytes * tex_info.dim.width),
+                    rows_per_image: Some(tex_info.dim.height)
                 },
                 extent,
             );
@@ -98,7 +95,7 @@ impl GpuHandle {
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        println!("[GpuContext] Created new texture with label '{}'", tex_payload.label);
+        println!("[GpuContext] Created new texture with label '{}'", blueprint.label);
 
         Ok(TextureHandle { texture, view, extent })
     }

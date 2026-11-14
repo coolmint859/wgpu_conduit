@@ -1,4 +1,4 @@
-use crate::{Computed, GpuContext, TexDimensions, TextureBlueprint, TextureHandle};
+use crate::{Computed, GpuContext, TextureDimensions, TextureBlueprint, TextureHandle};
 
 /// Represents color and depth attachments onto a `Canvas`.
 pub trait RenderAttachment {
@@ -20,9 +20,9 @@ impl RenderAttachment for StandardDepth {
 
     fn into_config(self) -> RenderAttachmentConfig {
         RenderAttachmentConfig {
-            blueprint: TextureBlueprint::render_attachment(wgpu::TextureFormat::Depth32Float).with_label(self.name()),
+            blueprint: TextureBlueprint::render_attachment().with_label(self.name()),
             dims: RenderAttachmentDimensions::Canvas,
-            format: wgpu::TextureFormat::Depth32Float
+            format: wgpu::TextureFormat::Depth32Float,
         }
     }
 }
@@ -42,7 +42,7 @@ pub struct RenderAttachmentConfig {
     pub blueprint: TextureBlueprint,
     /// The dimensions of the attachment. This is used to determine how large the attachment should be when created, as well as how it should be resized when the canvas is resized.
     pub dims: RenderAttachmentDimensions,
-    /// The format of the attachment texture.
+    /// The format of the texture
     pub format: wgpu::TextureFormat,
 }
 
@@ -53,7 +53,7 @@ impl RenderAttachmentConfig {
         
         context
             .gpu_handle()
-            .create_texture(self.blueprint.clone(), Computed { dim })
+            .create_texture(self.blueprint.clone(), Computed { dim, format: self.format })
             .expect(&format!("Failed to create texture handle for render attachment with label {}.", self.blueprint.label)) 
     }
 }
@@ -77,19 +77,19 @@ pub enum RenderAttachmentDimensions {
 
 impl RenderAttachmentDimensions {
     /// Converts `self` into texture dimensions as used when requesting a texture through the `GpuContext`. Does not consume `self`
-    pub(crate) fn as_tex_dims(&self, canvas_width: u32, canvas_height: u32) -> TexDimensions {
+    pub(crate) fn as_tex_dims(&self, canvas_width: u32, canvas_height: u32) -> TextureDimensions {
         match self {
             RenderAttachmentDimensions::Canvas => { 
-                TexDimensions::size_2d(canvas_width, canvas_height) 
+                TextureDimensions::size_2d(canvas_width, canvas_height) 
             }
             RenderAttachmentDimensions::Fixed { width, height } => {
-                TexDimensions::size_2d(*width, *height)
+                TextureDimensions::size_2d(*width, *height)
             }
             RenderAttachmentDimensions::Scaled(scale) => {
                 let width = (canvas_width as f32 / scale) as u32;
                 let height = (canvas_height as f32 / scale) as u32;
 
-                TexDimensions::size_2d(width, height)
+                TextureDimensions::size_2d(width, height)
             }
         }
     }

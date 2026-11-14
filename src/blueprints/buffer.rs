@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 use async_store::HoldPolicy;
 use uuid::Uuid;
 
@@ -20,33 +18,23 @@ where T: bytemuck::Pod + bytemuck::Zeroable
     fn to_bytes(&self) -> &[u8] { bytemuck::bytes_of(self) }
 }
 
-/// Represents buffer sources with no initial data.
-pub struct Empty;
-/// Represents buffer sources with some initial data.
-pub struct WithData;
-
 /// A wrapper around initial data sources for gpu buffers
-pub struct BufferSource<State> {
+pub struct BufferSource {
     pub data: Option<Vec<u8>>,
     pub capacity: u64,
-    _state: PhantomData<State>
 }
 
-impl BufferSource<Empty> {
+impl BufferSource {
     /// No initial data.
     /// 
-    /// If the buffer this source is populated with is a uniform buffer, then `capacity` 
-    /// is rounded to the nearest 16 bytes, in accordance with wgpu uniform buffer alignment rules.
+    /// If the accompanying `BufferBlueprint` is specified with the uniform usage, then `capacity` is rounded up to the nearest multiple of 16.
     pub fn empty(capacity: u64) -> Self {
         Self {
             data: None,
             capacity,
-            _state: PhantomData
         }
     }
-}
 
-impl BufferSource<WithData> {
     /// Initial data from a type `T` that implements `Serializable`,
     ///
     /// All types that implement `bytemuck::Pod` and `bytemuck::Zeroable` automatically implement `Serializable`
@@ -56,7 +44,6 @@ impl BufferSource<WithData> {
         Self {
             capacity: bytes.len() as u64,
             data: Some(bytes),
-            _state: PhantomData,
         }
     }
 
@@ -65,7 +52,6 @@ impl BufferSource<WithData> {
         Self {
             capacity: data.len() as u64,
             data: Some(data),
-            _state: PhantomData
         }
     }
 
@@ -78,7 +64,6 @@ impl BufferSource<WithData> {
         Self {
             capacity: bytes.len() as u64,
             data: Some(bytes),
-            _state: PhantomData
         }
     }
 
@@ -142,14 +127,6 @@ impl<'a> BufferUpdate for RawBytesUpdate<'a> {
     fn offset(&self) -> u64 { self.offset }
 }
 
-/// Condensed version of the generic buffer struct.
-pub struct BufferPayload {
-    pub label: String,
-    pub usage: wgpu::BufferUsages,
-    pub capacity: u64,
-    pub init_data: Option<Vec<u8>>
-}
-
 /// A blueprint for constructing wgpu Buffers, where T is the buffer type.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct BufferBlueprint {
@@ -163,7 +140,7 @@ impl BufferBlueprint {
     /// Create a buffer blueprint with the uniform usage type.
     /// 
     /// All Uniform buffers have a default capacity of 16 to follow wgpu alignment rules
-    pub fn as_uniform() -> Self {
+    pub fn uniform() -> Self {
         Self {
             label: "uniform_buffer".to_string(),
             usage: wgpu::BufferUsages::UNIFORM,
@@ -173,7 +150,7 @@ impl BufferBlueprint {
     }
 
     /// Create a buffer blueprint with the storage usage type.
-    pub fn as_storage() -> Self {
+    pub fn storage() -> Self {
         Self {
             label: "storage_buffer".to_string(),
             usage: wgpu::BufferUsages::STORAGE,
@@ -183,7 +160,7 @@ impl BufferBlueprint {
     }
 
     /// Create a buffer blueprint with the vertex usage type.
-    pub fn as_vertex() -> Self {
+    pub fn vertex() -> Self {
         Self {
             label: "vertex_buffer".to_string(),
             usage: wgpu::BufferUsages::VERTEX,
@@ -193,7 +170,7 @@ impl BufferBlueprint {
     }
 
     /// Create a buffer blueprint with the index usage type.
-    pub fn as_index() -> Self {
+    pub fn index() -> Self {
         Self {
             label: "index_buffer".to_string(),
             usage: wgpu::BufferUsages::INDEX,
@@ -270,23 +247,6 @@ impl BufferBlueprint {
 
         return data;
     }
-
-    /// Convert this buffer blueprint into it's payload representation, given some initial data and capacity.
-    /// 
-    /// Aligns `capacity` to the nearest multiple of 16 if this buffer has the uniform usage.
-    pub(crate) fn into_payload(self, data: Option<Vec<u8>>, capacity: u64) -> BufferPayload {
-        let capacity = match self.alignment {
-            Some(alignment) => BufferBlueprint::align(capacity, alignment),
-            None => capacity
-        };
-
-        BufferPayload {
-            label: self.label,
-            usage: self.usage,
-            capacity,
-            init_data: data 
-        }
-    }
 }
 
 impl GpuResource for BufferBlueprint {
@@ -294,5 +254,50 @@ impl GpuResource for BufferBlueprint {
 
     fn create_id(&self) -> Self::Id {
         BufferId(Uuid::new_v4())
+    }
+}
+
+/// Utility functions for buffer data
+pub mod buffer_utils {
+    use crate::Serializable;
+
+    /// Pads `data` with 0s to align the length to a multiple of `alignment`
+    pub fn pad_bytes(mut data: Vec<u8>, alignment: usize) -> Vec<u8> {
+        let remainder = data.len() % alignment;
+        if remainder > 0 {
+            let padding = alignment - remainder;
+            data.resize(data.len() + padding, 0u8);
+        }
+
+        data
+    }
+
+    /// Rounds `value` to the nearest multiple of `alignment`.
+    pub fn align(mut value: u64, alignment: u64) -> u64 {
+        let remainder = value % alignment;
+        if remainder > 0 {
+            let padding = alignment - remainder;
+            value += padding;
+        }
+
+        value
+    }
+
+    /// Extends a byte vector `data` with 0s up to `capacity`.
+    /// 
+    /// If the length of `data` is already larger than `capacity`, this method does nothing.
+    pub fn extend_bytes(mut data: Vec<u8>, capacity: usize) -> Vec<u8> {
+        if capacity - data.len() > 0 {
+            data.resize(capacity, 0u8);
+        }
+
+        return data;
+    }
+
+    /// Serializes a vector of `T` where T implements `Serializable` and `bytemuck::NoUninit`
+    /// 
+    /// This is functionally equivelant to `bytemuck::cast_vec()`
+    pub fn serialize<T: Serializable + bytemuck::NoUninit>(data: Vec<T>) -> Vec<u8> {
+        bytemuck::cast_vec(data)
     }
 }

@@ -1,11 +1,11 @@
 use std::{collections::HashSet};
-use async_store::{HoldPolicy, ResourceHandler, Task, TaskConfig};
+use async_store::{ResourceHandler, Task, TaskConfig};
 
 use crate::{gpu::GpuHandle, context::*, blueprints::*};
 
 /// Represents types that can be identified as a gpu resource
 pub trait GpuResource {
-    /// The id type mapped to the `ResourceId` type
+    /// The id type of the gpu resource
     type Id;
 
     /// Create a new id as the associated type `Self::Id`
@@ -91,7 +91,7 @@ impl GpuContext {
     /// Request a buffer to be created from the provided blueprint.
     /// 
     /// Returns a `BufferId` that is uniquely associated with the resultant wgpu `Buffer`.
-    pub fn request_buffer<S>(&mut self, blueprint: BufferBlueprint, source: BufferSource<S>) -> BufferId {
+    pub fn request_buffer(&mut self, blueprint: BufferBlueprint, source: BufferSource) -> BufferId {
         let id = blueprint.create_id();
 
         let policy = blueprint.hold_policy.unwrap_or(self.global_hp.buffers);
@@ -99,7 +99,7 @@ impl GpuContext {
 
         let gpu = self.gpu.clone();
         let buffer_task = Task::io_bound( task_config, async move {
-            gpu.create_buffer(blueprint, source.data, source.capacity)
+            gpu.create_buffer(blueprint, source)
         });
 
         self.resources.buffers.request(id, buffer_task);
@@ -110,7 +110,7 @@ impl GpuContext {
     /// Ensures a buffer has been requested.
     /// 
     /// If `test_id` maps to an already requested buffer, it's returned back to the caller. Otherwise a new buffer is requested from `blueprint` and `source`, and a new `BufferId` is returned. 
-    pub fn ensure_buffer<S>(&mut self, test_id: BufferId, blueprint: BufferBlueprint, source: BufferSource<S>) -> BufferId {
+    pub fn ensure_buffer(&mut self, test_id: BufferId, blueprint: BufferBlueprint, source: BufferSource) -> BufferId {
         if self.is_buffer_requested(&test_id) { return test_id };
         self.request_buffer(blueprint, source)
     }
@@ -124,27 +124,6 @@ impl GpuContext {
         let policy = blueprint.hold_policy.unwrap_or(self.global_hp.buffers);
         let task_config = TaskConfig::new(policy);
 
-        let gpu = self.gpu.clone();
-        let texture_task = Task::io_bound(task_config, async move {
-            gpu.create_texture(blueprint, source)
-        });
-
-        self.resources.textures.request(id, texture_task);
-
-        id
-    }
-
-    /// Request a texture to be created for use as a depth attachment.
-    /// 
-    /// The format of resultant texture is `wgpu::TextureFormat::Depth32Float`. 
-    pub fn request_depth_texture(&mut self, width: u32, height: u32, hold_policy: Option<HoldPolicy>) -> TextureId {
-        let blueprint = TextureBlueprint::render_attachment(wgpu::TextureFormat::Depth32Float);
-        let source = Computed { dim: TexDimensions::size_2d(width, height) };
-        let id = blueprint.create_id();
-
-        let policy = hold_policy.unwrap_or(self.global_hp.buffers);
-        let task_config = TaskConfig::new(policy);
-        
         let gpu = self.gpu.clone();
         let texture_task = Task::io_bound(task_config, async move {
             gpu.create_texture(blueprint, source)

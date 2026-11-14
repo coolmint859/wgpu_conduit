@@ -26,7 +26,7 @@ impl Camera {
     /// Initialize this camera
     pub fn init(&mut self, graphics: &mut Graphics) {
         self.id = graphics.context.request_buffer(
-            BufferBlueprint::as_uniform()
+            BufferBlueprint::uniform()
                 .writable()
                 .with_label("camera_uniform"), 
             BufferSource::from_pod(

@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 use crate::{TextureHandle, context::*};
 
+/// The raw binding target for use in a `wgpu::BindGroup`
 pub(crate) enum ResolvedTarget {
     Buffer(wgpu::Buffer),
     Texture(TextureHandle),
@@ -12,6 +13,7 @@ pub(crate) enum ResolvedTarget {
 }
 
 impl ResolvedTarget {
+    /// Converts `self` into a `wgpu::BindingResource`
     pub fn to_wgpu_binding(&self) -> wgpu::BindingResource<'_> {
         match self {
             ResolvedTarget::Buffer(buf) => buf.as_entire_binding(),
@@ -55,14 +57,25 @@ impl BindingTarget {
     }
 }
 
+
 /// Represents gpu resources that can be used in a bind group
 pub trait Bindable {
-    /// Get the resource binding as it's entire wgpu binding type
-    fn as_binding(&self) -> wgpu::BindingType;
-    /// Get the id of the target resource the binding refers to
-    fn target(&self) -> BindingTarget;
-    /// Get the shader stage visibility of the resource binding
-    fn visibility(&self) -> wgpu::ShaderStages;
+    /// Converts `self` into the concrete resource binding
+    fn into_binding(self) -> ResourceBinding;
+}
+
+/// Contains the binding information for a `BindGroupBlueprint` entry.
+pub struct ResourceBinding {
+    /// The target resource for the bind group entry.
+    pub target: BindingTarget,
+    /// the binding type of the resource entry.
+    pub ty: wgpu::BindingType,
+    /// the shader stage visibility of the resource.
+    pub visibility: wgpu::ShaderStages,
+}
+
+impl Bindable for ResourceBinding {
+    fn into_binding(self) -> ResourceBinding { self }
 }
 
 /// A resource entry into a bind group
@@ -111,11 +124,12 @@ impl BindGroupBlueprint {
 
     /// Add an entry into the bind group
     pub fn add_entry(&mut self, entry: impl Bindable) {
+        let binding = entry.into_binding();
         let slot = self.bindings.len() as u32;
-        self.layout.add_entry(&entry);
+        self.layout.add_entry(&binding);
 
         self.bindings.push(GroupEntry { 
-            target: entry.target(),
+            target: binding.target,
             slot
         });
     }
@@ -143,19 +157,19 @@ impl LayoutBlueprint {
     }
 
     /// Add an entry into the bind group layout
-    pub fn with_entry(mut self, entry: &impl Bindable) -> Self {
-        self.add_entry(entry);
+    pub fn with_entry(mut self, binding: &ResourceBinding) -> Self {
+        self.add_entry(binding);
         self
     }
 
     /// Add an entry into the bind group layout
-    pub fn add_entry(&mut self, entry: &impl Bindable) {
+    pub fn add_entry(&mut self, binding: &ResourceBinding) {
         let slot = self.entries.len() as u32;
 
         self.entries.push(wgpu::BindGroupLayoutEntry {
             binding: slot,
-            visibility: entry.visibility(),
-            ty: entry.as_binding(),
+            visibility: binding.visibility,
+            ty: binding.ty,
             count: None,
         });
     }
@@ -308,7 +322,7 @@ impl TextureBinding {
     }
 
     /// Create a new storage texture binding
-    pub fn as_storage(target: TextureId, options: StorageTextureOptions) -> Self {
+    pub fn storage(target: TextureId, options: StorageTextureOptions) -> Self {
         let ty = wgpu::BindingType::StorageTexture { 
             access: options.access,
             format: options.format, 
@@ -330,8 +344,17 @@ impl TextureBinding {
     }
 
     /// Set the view dimensions for the texture binding
-    pub fn with_view_dimensions(mut self, view_dimensions: wgpu::TextureViewDimension) -> Self {
-        self.view_dimensions = view_dimensions;
+    pub fn with_view_dimensions(mut self, dim: wgpu::TextureViewDimension) -> Self {
+        match &mut self.ty {
+            wgpu::BindingType::Texture { view_dimension, .. } => {
+                *view_dimension = dim;
+            },
+            wgpu::BindingType::StorageTexture { view_dimension, ..} => {
+                *view_dimension = dim;
+            },
+            _ => {}
+        }
+        self.view_dimensions = dim;
         self
     }
 
@@ -343,16 +366,12 @@ impl TextureBinding {
 }
 
 impl Bindable for TextureBinding {
-    fn as_binding(&self) -> wgpu::BindingType {
-        self.ty
-    }
-
-    fn target(&self) -> BindingTarget {
-        BindingTarget::Texture(self.target)
-    }
-
-    fn visibility(&self) -> wgpu::ShaderStages {
-        self.visibility
+    fn into_binding(self) -> ResourceBinding {
+        ResourceBinding {
+            target: BindingTarget::Texture(self.target),
+            ty: self.ty,
+            visibility: self.visibility
+        }
     }
 }
 
@@ -377,13 +396,13 @@ impl BufferBinding {
     }
 
     /// Create a new storage buffer binding
-    pub fn as_storage(target: BufferId, read_only: bool) -> Self {
+    pub fn storage(target: BufferId, read_only: bool) -> Self {
         let ty = wgpu::BufferBindingType::Storage { read_only };
         BufferBinding::new(target, ty)
     }
 
     /// Create a new uniform buffer binding
-    pub fn as_uniform(target: BufferId) -> Self {
+    pub fn uniform(target: BufferId) -> Self {
         let ty = wgpu::BufferBindingType::Uniform;
         BufferBinding::new(target, ty)
     }
@@ -400,32 +419,26 @@ impl BufferBinding {
         self
     }
 
-    /// Set the minimum buffer size for the binding. Must be greater than 0.
-    pub fn with_min_size(mut self, size: u64) -> Self {
-        self.min_binding_size = Some(NonZero::new(size)
-            .expect("[Buffer Binding] Expected minimum binding size to be a non zero unsigned number."));
+    /// Set the minimum buffer size for the binding.
+    pub fn with_min_size(mut self, size: NonZero<u64>) -> Self {
+        self.min_binding_size = Some(size);
         self
     }
 }
 
 impl Bindable for BufferBinding {
-    fn as_binding(&self) -> wgpu::BindingType {
-        wgpu::BindingType::Buffer {
-            ty: self.ty,
-            has_dynamic_offset: self.has_dyn_offset,
-            min_binding_size: self.min_binding_size
+    fn into_binding(self) -> ResourceBinding {
+        ResourceBinding {
+            target: BindingTarget::Buffer(self.target),
+            ty: wgpu::BindingType::Buffer { 
+                ty: self.ty, 
+                has_dynamic_offset: self.has_dyn_offset, 
+                min_binding_size: self.min_binding_size 
+            },
+            visibility: self.visibility
         }
     }
-
-    fn target(&self) -> BindingTarget {
-        BindingTarget::Buffer(self.target)
-    }
-
-    fn visibility(&self) -> wgpu::ShaderStages {
-        self.visibility
-    }
 }
-
 
 /// Represents the binding of a Sampler in a bind group
 pub struct SamplerBinding {
@@ -467,24 +480,14 @@ impl SamplerBinding {
         self.visibility = visibility;
         self
     }
-
-    /// Set the binding type of the sampler binding
-    pub fn with_binding_type(mut self, ty: wgpu::SamplerBindingType) -> Self{
-        self.ty = ty;
-        self
-    }
 }
 
 impl Bindable for SamplerBinding {
-    fn as_binding(&self) -> wgpu::BindingType {
-        wgpu::BindingType::Sampler(self.ty)
-    }
-
-    fn target(&self) -> super::BindingTarget {
-        BindingTarget::Sampler(self.target)
-    }
-
-    fn visibility(&self) -> wgpu::ShaderStages {
-        self.visibility
+    fn into_binding(self) -> ResourceBinding {
+        ResourceBinding {
+            target: BindingTarget::Sampler(self.target),
+            ty: wgpu::BindingType::Sampler(self.ty),
+            visibility: self.visibility
+        }
     }
 }

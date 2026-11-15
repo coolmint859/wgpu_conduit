@@ -139,19 +139,15 @@ impl GpuHandle {
         Ok(bind_group)
     }
 
-    /// Create a new render pipeline from the given configuration builder
-    pub fn create_render_pipeline(
-        &self,
-        blueprint: PipelineBlueprint<Render>,
-        bg_layouts: Vec<wgpu::BindGroupLayout>
-    ) -> Result<PipelineHandle, String> {
-        let shader_source = match blueprint.shader {
+    /// Create a new shader module from the given `ShaderBlueprint`
+    pub fn create_shader_module(&self, blueprint: &ShaderBlueprint) -> Result<wgpu::ShaderModule, String> {
+        let shader_source = match &blueprint.source {
             ShaderSource::OnDisk(path) => {
-                match std::fs::read_to_string(&path) {
+                match std::fs::read_to_string(path) {
                     Ok(source) => source,
                     Err(e) => {
-                        println!("[Render Pipeline] Failed to read shader file '{}': {e}", path);
-                        return Err(format!("[Render Pipeline] Failed to read shader file '{}': {e}", path));
+                        println!("[GpuHandle] Failed to read shader file '{}': {e}", path);
+                        return Err(format!("[GpuHandle] Failed to read shader file '{}': {e}", path));
                     }
                 }
             },
@@ -163,6 +159,19 @@ impl GpuHandle {
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&shader_source))
         });
 
+        println!("[GpuContext] Created new shader module with label '{}'", blueprint.label);
+
+        Ok(shader)
+    }
+
+    /// Create a new render pipeline from the given configuration builder
+    pub fn create_render_pipeline(
+        &self,
+        blueprint: PipelineBlueprint<Render>,
+        vertex_shader: ResolvedShaderProgram,
+        fragment_shader: Option<ResolvedShaderProgram>,
+        bg_layouts: Vec<wgpu::BindGroupLayout>
+    ) -> Result<PipelineHandle, String> {
         let bg_layout_refs: Vec<&wgpu::BindGroupLayout> = bg_layouts
             .iter()
             .map(|layout| layout)
@@ -179,25 +188,28 @@ impl GpuHandle {
             .map(|l| l.as_wgpu_layout())
             .collect();
 
+        let fragment_state = match &fragment_shader {
+            Some(shader) => {
+                Some(wgpu::FragmentState {
+                    module: &shader.module,
+                    entry_point: Some(shader.entry),
+                    compilation_options: Default::default(),
+                    targets: &blueprint.ty.color_targets
+                })
+            },
+            None => None
+        };
+
         let pipeline = self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(&blueprint.label),
             layout: Some(&layout),
             vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some(&blueprint.ty.vs_main),
+                module: &vertex_shader.module,
+                entry_point: Some(vertex_shader.entry),
                 compilation_options: Default::default(),
                 buffers: &vertex_layouts,
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some(&blueprint.ty.fs_main),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: blueprint.ty.format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
+            fragment: fragment_state,
             primitive: blueprint.ty.primitive_state,
             depth_stencil: blueprint.ty.depth_stencil,
             multisample: wgpu::MultisampleState::default(),
@@ -213,26 +225,9 @@ impl GpuHandle {
     pub fn create_compute_pipeline(
         &self, 
         blueprint: PipelineBlueprint<Compute>,
+        shader: ResolvedShaderProgram,
         bg_layouts: Vec<wgpu::BindGroupLayout>
     ) -> Result<PipelineHandle, String> {
-        let shader_source = match blueprint.shader {
-            ShaderSource::OnDisk(path) => {
-                match std::fs::read_to_string(&path) {
-                    Ok(source) => source,
-                    Err(e) => {
-                        println!("[Render Pipeline] Failed to read shader file '{}': {e}", path);
-                        return Err(format!("[Render Pipeline] Failed to read shader file '{}': {e}", path));
-                    }
-                }
-            },
-            ShaderSource::Embedded(source) => source.to_string()
-        };
-
-        let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some(&format!("{}_source", blueprint.label)),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&shader_source))
-        });
-
         let bg_layout_refs: Vec<&wgpu::BindGroupLayout> = bg_layouts
             .iter()
             .map(|layout| layout)
@@ -247,8 +242,8 @@ impl GpuHandle {
         let pipeline = self.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some(&blueprint.label),
             layout: Some(&layout),
-            module: &shader,
-            entry_point: Some(&blueprint.ty.main),
+            module: &shader.module,
+            entry_point: Some(shader.entry),
             compilation_options: Default::default(),
             cache: None
         });

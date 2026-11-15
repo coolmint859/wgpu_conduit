@@ -78,6 +78,18 @@ impl Canvas {
         })
     }
 
+    /// Returns a `wgpu::ColorTargetState` for the canvas surface attachment.
+    /// 
+    /// While all instances of `Canvas` are guarenteed to have a surface attachment, 
+    /// this returns an `Option<>` to make it easier to add into pipelines.
+    pub fn surface_state(
+        &self,
+        blend: Option<wgpu::BlendState>,
+        write_mask: wgpu::ColorWrites,
+    ) -> Option<wgpu::ColorTargetState> {
+        self.frame_buffer.surface_state(blend, write_mask)
+    }
+
     /// Returns a `wgpu::ColorTargetState` as defined by the provided `RenderAttachment` implementation and state configurations, if available.
     pub fn color_state(
         &self,

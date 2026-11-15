@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use wgpu_conduit::{Canvas, DrawCommand, MultiBufferExecutor, PipelineBlueprint, blueprints::{BufferBlueprint, BufferSource, ShaderSource, VertexBufferLayout, VertexLayout}, context::{BufferId, GpuContext, PipelineId}, execution::IndexedDraw};
+use wgpu_conduit::{Canvas, DrawCommand, MultiBufferExecutor, PipelineBlueprint, ShaderBlueprint, ShaderProgram, blueprints::{BufferBlueprint, BufferSource, VertexBufferLayout, VertexLayout}, context::{BufferId, GpuContext, PipelineId}, execution::IndexedDraw};
 use winit::{application::ApplicationHandler, dpi::{PhysicalSize, Size}, event::WindowEvent, event_loop::{ActiveEventLoop, ControlFlow, EventLoop}, window::{WindowAttributes, WindowId}};
 
 /// Container for the gpu context and rendering canvas
@@ -31,8 +31,8 @@ pub struct Triangle {
 } 
 
 impl Triangle {
-    pub fn new(context: &mut GpuContext) -> Self {
-        let vertices = context.request_buffer(
+    pub fn new(graphics: &mut Graphics) -> Self {
+        let vertices = graphics.context.request_buffer(
             BufferBlueprint::vertex(), 
             BufferSource::from_vec(vec![
                 Vertex { position: [ 0.0,  0.5, 0.0], color: [1.0, 0.0, 0.0] },
@@ -41,14 +41,21 @@ impl Triangle {
             ])
         );
 
-        let indices = context.request_buffer(
+        let indices = graphics.context.request_buffer(
             BufferBlueprint::index(), 
             BufferSource::from_vec(vec![0u32, 1, 2])
         );
 
-        let shader = ShaderSource::Embedded(include_str!("shaders/2d_render.wgsl"));
-        let pipeline = context.request_pipeline(
-            PipelineBlueprint::render(shader)
+        let shader = graphics.context.request_shader(
+            ShaderBlueprint::embedded(include_str!("shaders/2d_render.wgsl"))
+                .with_label("triangle shader")
+        );
+
+        let pipeline = graphics.context.request_pipeline(
+            PipelineBlueprint::render(ShaderProgram { id: shader, entry: "vs_main"})
+                .with_label("triangle pipeline")
+                .with_fragment_shader(ShaderProgram { id: shader, entry: "fs_main" })
+                .with_color_state(graphics.canvas.surface_state(Some(wgpu::BlendState::REPLACE), wgpu::ColorWrites::ALL))
                 .with_vertex_layout::<Vertex>()
         );
 
@@ -110,7 +117,7 @@ impl ApplicationHandler for App {
 
         let window = Arc::new(event_loop.create_window(window_attrs).unwrap());
 
-        let mut context = GpuContext::builder()
+        let context = GpuContext::builder()
             .with_backend(wgpu::Backends::DX12)
             .init_blocking()
             .expect("Failed to initialize gpu context");
@@ -119,9 +126,11 @@ impl ApplicationHandler for App {
             .init(window, &context)
             .expect("Failed to initialize rendering canvas");
 
-        let triangle = Triangle::new(&mut context);
+        let mut graphics = Graphics { context, canvas };
 
-        self.graphics = Some(Graphics { context, canvas });
+        let triangle = Triangle::new(&mut graphics);
+
+        self.graphics = Some(graphics);
         self.triangle = Some(triangle);
     }
 

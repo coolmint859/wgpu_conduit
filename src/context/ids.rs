@@ -6,7 +6,7 @@ use uuid::Uuid;
 pub struct BufferId(pub Uuid);
 
 impl BufferId {
-    /// A uninitialized `BufferId` (refers to nothing). 
+    /// An uninitialized `BufferId` (refers to nothing). 
     pub const UNINIT: Self = BufferId(Uuid::nil());
 }
 
@@ -16,7 +16,7 @@ impl BufferId {
 pub struct TextureId(pub Uuid);
 
 impl TextureId {
-    /// A uninitialized `TextureId` (refers to nothing). 
+    /// An uninitialized `TextureId` (refers to nothing). 
     pub const UNINIT: Self = TextureId(Uuid::nil());
 }
 
@@ -26,7 +26,7 @@ impl TextureId {
 pub struct SamplerId(pub Uuid);
 
 impl SamplerId {
-    /// A uninitialized `SamplerId` (refers to nothing). 
+    /// An uninitialized `SamplerId` (refers to nothing). 
     pub const UNINIT: Self = SamplerId(Uuid::nil());
 }
 
@@ -36,7 +36,7 @@ impl SamplerId {
 pub struct BindGroupId(pub Uuid);
 
 impl BindGroupId {
-    /// A uninitialized `BindGroupId` (refers to nothing). 
+    /// An uninitialized `BindGroupId` (refers to nothing). 
     pub const UNINIT: Self = BindGroupId(Uuid::nil());
 }
 
@@ -46,7 +46,7 @@ impl BindGroupId {
 pub struct LayoutId(pub Uuid);
 
 impl LayoutId {
-    /// A uninitialized `LayoutId` (refers to nothing). 
+    /// An uninitialized `LayoutId` (refers to nothing). 
     pub const UNINIT: Self = LayoutId(Uuid::nil());
 }
 
@@ -58,11 +58,21 @@ pub struct BindGroupIdPair {
 }
 
 impl BindGroupIdPair {
-    /// A uninitialized `BindGroupIdPair` (ids refer to nothing). 
+    /// An uninitialized `BindGroupIdPair` (ids refer to nothing). 
     pub const UNINIT: Self = BindGroupIdPair {
         id: BindGroupId::UNINIT,
         layout_id: LayoutId::UNINIT
     };
+}
+
+/// Unique identifier for a shader module
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] 
+pub struct ShaderId(pub Uuid);
+
+impl ShaderId {
+    /// An uninitialized `ShaderId` (refers to nothing). 
+    pub const UNINIT: Self = ShaderId(Uuid::nil());
 }
 
 /// Content-Addressable identifier for a pipeline
@@ -71,6 +81,6 @@ impl BindGroupIdPair {
 pub struct PipelineId(pub Uuid);
 
 impl PipelineId {
-    /// A uninitialized `PipelineId` (refers to nothing). 
+    /// An uninitialized `PipelineId` (refers to nothing). 
     pub const UNINIT: Self = PipelineId(Uuid::nil());
 }

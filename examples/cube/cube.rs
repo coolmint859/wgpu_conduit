@@ -1,4 +1,4 @@
-use wgpu_conduit::{BindGroupBlueprint, BindGroupIdPair, BufferBinding, BufferBlueprint, BufferId, BufferSource, DrawCommand, IndexedDraw, PipelineBlueprint, PipelineId, Procedural, SampledTextureOptions, SamplerBinding, SamplerBlueprint, ShaderSource, StandardDepth, StructuredUpdate, TextureBinding, TextureBlueprint, TextureDimensions, VertexBufferLayout, VertexLayout};
+use wgpu_conduit::{BindGroupBlueprint, BindGroupIdPair, BufferBinding, BufferBlueprint, BufferId, BufferSource, DrawCommand, IndexedDraw, PipelineBlueprint, PipelineId, Procedural, SampledTextureOptions, SamplerBinding, SamplerBlueprint, ShaderBlueprint, ShaderProgram, StandardDepth, StructuredUpdate, TextureBinding, TextureBlueprint, TextureDimensions, VertexBufferLayout, VertexLayout};
 
 use crate::Graphics;
 
@@ -114,7 +114,11 @@ impl ColoredCube {
                 .with_label("cube_color_bg")
         );
 
-        let shader = ShaderSource::Embedded(include_str!(".././shaders/colored_3d.wgsl"));
+        let shader = graphics.context.request_shader(
+            ShaderBlueprint::embedded(include_str!(".././shaders/colored_3d.wgsl"))
+                .with_label("colored cube shader")
+        );
+
         let depth_state = graphics.canvas.depth_state(
             StandardDepth, 
             wgpu::CompareFunction::Less, 
@@ -122,9 +126,11 @@ impl ColoredCube {
         );
 
         let pipeline = graphics.context.request_pipeline(
-            PipelineBlueprint::render(shader)
+            PipelineBlueprint::render(ShaderProgram { id: shader, entry: "vs_main" })
                 .with_label("cube_colored_pip")
                 .with_bg_layouts(&[bg.layout_id])
+                .with_fragment_shader(ShaderProgram { id: shader, entry: "fs_main" })
+                .with_color_state(graphics.canvas.surface_state(Some(wgpu::BlendState::REPLACE), wgpu::ColorWrites::ALL))
                 .with_vertex_layout::<ColorVertex>()
                 .with_depth_state(depth_state)
                 .with_backface_culling()
@@ -199,7 +205,11 @@ impl TexturedCube {
                 .with_entry(SamplerBinding::non_filtering(samp))
         );
 
-        let shader = ShaderSource::Embedded(include_str!(".././shaders/textured_3d.wgsl"));
+        let shader = graphics.context.request_shader(
+            ShaderBlueprint::embedded(include_str!(".././shaders/textured_3d.wgsl"))
+                .with_label("textured cube shader")
+        );
+
         let depth_state = graphics.canvas.depth_state(
             StandardDepth, 
             wgpu::CompareFunction::Less, 
@@ -207,10 +217,12 @@ impl TexturedCube {
         );
 
         let pipeline = graphics.context.request_pipeline(
-            PipelineBlueprint::render(shader)
+            PipelineBlueprint::render(ShaderProgram { id: shader, entry: "vs_main" })
                 .with_label("cube_textured_pip")
                 .with_bg_layouts(&[bg.layout_id])
+                .with_fragment_shader(ShaderProgram { id: shader, entry: "fs_main" })
                 .with_vertex_layout::<TextureVertex>()
+                .with_color_state(graphics.canvas.surface_state(Some(wgpu::BlendState::REPLACE), wgpu::ColorWrites::ALL))
                 .with_depth_state(depth_state)
                 .with_backface_culling()
         );

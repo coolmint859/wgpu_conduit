@@ -33,6 +33,7 @@ pub struct GlobalHoldPolicy {
     pub samplers: HoldPolicy,
     pub bind_groups: HoldPolicy,
     pub pipelines: HoldPolicy,
+    pub shaders: HoldPolicy,
 }
 
 impl Default for GlobalHoldPolicy {
@@ -43,6 +44,7 @@ impl Default for GlobalHoldPolicy {
             samplers: HoldPolicy::Indefinite,
             bind_groups: HoldPolicy::Indefinite,
             pipelines: HoldPolicy::Indefinite,
+            shaders: HoldPolicy::Indefinite,
         }
     }
 }

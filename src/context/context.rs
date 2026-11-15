@@ -90,7 +90,7 @@ impl GpuContext {
 
     /// Request a buffer to be created from the provided blueprint.
     /// 
-    /// Returns a `BufferId` that is uniquely associated with the resultant wgpu `Buffer`.
+    /// Returns a `BufferId` that is uniquely associated with the resultant `wgpu::Buffer`.
     pub fn request_buffer(&mut self, blueprint: BufferBlueprint, source: BufferSource) -> BufferId {
         let id = blueprint.create_id();
 
@@ -117,7 +117,7 @@ impl GpuContext {
 
     /// Request a texture to be created from the provided blueprint and source.
     /// 
-    /// Returns a `TextureId` that is uniquely associated with the resultant wgpu `Texture`.
+    /// Returns a `TextureId` that is uniquely associated with the resultant `wgpu::Texture`.
     pub fn request_texture(&mut self, blueprint: TextureBlueprint, source: impl TextureSource) -> TextureId {
         let id = blueprint.create_id();
 
@@ -182,11 +182,18 @@ impl GpuContext {
         self.request_bind_group(blueprint)
     }
 
+    /// Request a shader module to be created from the provided blueprint.
+    /// 
+    ///  Returns a `ShaderId` that is uniquely associated with the resultant `wgpu::ShaderModule`.
+    pub fn request_shader(&mut self, blueprint: ShaderBlueprint) -> ShaderId {
+        return self.pip_registry.request_shader(&blueprint, self.global_hp.shaders)
+    }
+
     /// Request a pipeline to be created from the provided blueprint.
     /// 
     /// Returns a `PipelineId` that is content-addressable to the blueprint. (This ensures that identical pipeline blueprints map to the same id)
     pub fn request_pipeline(&mut self, blueprint: impl Into<Pipeline>) -> PipelineId {
-        return self.pip_registry.request(blueprint.into(), &self.bg_registry, self.global_hp.pipelines);
+        return self.pip_registry.request_pip(blueprint.into(), &self.bg_registry, self.global_hp.pipelines);
     }
 
     /// Sync pending resources with the main thread. This should be called regularly.

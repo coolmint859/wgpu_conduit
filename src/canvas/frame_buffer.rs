@@ -62,9 +62,17 @@ impl FrameBuffer {
         self.config.width as f32 / self.config.height as f32
     }
 
-    /// Returns the format of the surface texture
-    pub fn surface_format(&self) -> wgpu::TextureFormat {
-        self.config.format
+    /// Returns a `wgpu::ColorTargetState` for the surface attachment.
+    pub fn surface_state(
+        &self, 
+        blend: Option<wgpu::BlendState>, 
+        write: wgpu::ColorWrites
+    ) -> Option<wgpu::ColorTargetState> {
+        Some(wgpu::ColorTargetState { 
+            format: self.config.format, 
+            blend, 
+            write_mask: write
+        })
     }
 
     // /// Returns the format of an attachment texture if mapped to the provided `RenderAttachment` implementation.

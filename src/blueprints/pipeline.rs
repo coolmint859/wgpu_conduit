@@ -3,17 +3,23 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use async_store::HoldPolicy;
 use uuid::Uuid;
 
-use crate::{context::*, blueprints::{VertexBufferLayout, VertexLayout}};
+use crate::{blueprints::{VertexBufferLayout, VertexLayout}, context::*};
 
-/// The method of obtaining the source code for a shader module
-#[derive(Clone, Debug, Hash)]
-pub enum ShaderSource {
-    /// Shader code is loaded in dynamically from disk
-    OnDisk(&'static str),
-    /// Shader code is embedded in the binary of the driver program
-    /// 
-    /// Works best with `include_str!()`
-    Embedded(&'static str)
+/// Handle to a resolved shader program (module and entry point)
+pub struct ResolvedShaderProgram {
+    /// Handle to the shader module
+    pub module: wgpu::ShaderModule,
+    /// Entry function in the shader code
+    pub entry: &'static str,
+}
+
+/// The shader program used in a pipeline.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct ShaderProgram {
+    /// The id to the shader module used
+    pub id: ShaderId,
+    /// Entry function in the shader code
+    pub entry: &'static str,
 }
 
 /// Represents a handle to a render/compute pipeline
@@ -73,9 +79,8 @@ impl Default for DepthState {
 /// Holds configuration state for a render pipeline blueprint
 #[derive(Clone, Debug, Hash)]
 pub struct Render {
-    pub(crate) vs_main: &'static str, 
-    pub(crate) fs_main: &'static str, 
-    pub(crate) format: wgpu::TextureFormat,
+    pub(crate) vertex_shader: ShaderProgram,
+    pub(crate) fragment_shader: Option<ShaderProgram>,
     pub(crate) vertex_layouts: Vec<VertexBufferLayout>,
     pub(crate) color_targets: Vec<Option<wgpu::ColorTargetState>>,
     pub(crate) depth_stencil: Option<wgpu::DepthStencilState>,
@@ -83,11 +88,10 @@ pub struct Render {
 }
 
 impl Render {
-    pub fn new(vs_main: &'static str, fs_main: &'static str) -> Self {
+    pub fn new(vertex_shader: ShaderProgram) -> Self {
         Self {
-            vs_main,
-            fs_main,
-            format: wgpu::TextureFormat::Bgra8UnormSrgb,
+            vertex_shader,
+            fragment_shader: None,
             vertex_layouts: Vec::new(),
             depth_stencil: None,
             color_targets: Vec::new(),
@@ -99,13 +103,18 @@ impl Render {
 /// Holds configurations state for a compute pipeline creation
 #[derive(Clone, Copy, Debug, Hash)]
 pub struct Compute {
-    pub(crate) main: &'static str,
+    pub shader: ShaderProgram,
 }
 
 impl Compute {
-    pub fn new(main: &'static str) -> Self {
-        Self { main }
+    pub fn new(shader: ShaderProgram) -> Self {
+        Self { shader }
     }
+}
+
+pub enum PipelineShaders {
+    Render { vertex: ShaderProgram, fragment: Option<ShaderProgram> },
+    Compute(ShaderProgram)
 }
 
 /// The type of gpu pipeline. This is used internally by the context to create the underlying wgpu pipelines
@@ -153,7 +162,6 @@ impl GpuResource for Pipeline {
 pub struct PipelineBlueprint<T: Hash> {
     pub label: String,
     pub bg_layouts: Vec<LayoutId>,
-    pub shader: ShaderSource,
     pub hold_policy: Option<HoldPolicy>,
     pub ty: T,
 }
@@ -190,26 +198,18 @@ impl<T: Hash> GpuResource for PipelineBlueprint<T> {
 
 impl PipelineBlueprint<Render> {
     /// Create a new render pipeline.
-    pub fn render(shader: ShaderSource) -> Self {
+    pub fn render(vertex_shader: ShaderProgram) -> Self {
         Self {
             label: "render_pipeline".to_string(),
             bg_layouts: Vec::new(),
-            shader,
             hold_policy: None,
-            ty: Render::new("vs_main", "fs_main")
+            ty: Render::new(vertex_shader)
         }
     }
 
-    /// Set the entry points of the render shader for the render pipeline
-    pub fn with_entry_points(mut self, vs_main: &'static str, fs_main: &'static str) -> Self {
-        self.ty.vs_main = vs_main;
-        self.ty.fs_main = fs_main;
-        self
-    }
-
-    /// Set the output format of the render pipeline. This must match the target format for the corresponding render pass
-    pub fn with_format(mut self, format: wgpu::TextureFormat) -> Self {
-        self.ty.format = format;
+    /// Set the fragment shader for the render pipeline.
+    pub fn with_fragment_shader(mut self, shader: ShaderProgram) -> Self {
+        self.ty.fragment_shader = Some(shader);
         self
     }
 
@@ -268,19 +268,12 @@ impl PipelineBlueprint<Render> {
 
 impl PipelineBlueprint<Compute> {
     /// Create a new compute pipeline
-    pub fn compute(shader: ShaderSource) -> Self {
+    pub fn compute(shader: ShaderProgram) -> Self {
         Self {
             label: "compute_pipeline".to_string(),
             bg_layouts: Vec::new(),
-            shader,
             hold_policy: None,
-            ty: Compute::new("cs_main")
+            ty: Compute::new(shader)
         }
-    }
-
-    /// Set the entry point of the compute shader for the compute pipeline
-    pub fn with_entry_point(mut self, main: &'static str) -> Self {
-        self.ty.main = main;
-        self
     }
 }

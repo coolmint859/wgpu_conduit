@@ -5,26 +5,36 @@ use uuid::Uuid;
 
 use crate::{GpuResource, ShaderId};
 
+
+/// The shader program used in a pipeline.
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct ShaderInfo {
+    /// The id to the shader module used
+    pub id: ShaderId,
+    /// Entry function in the shader code
+    pub entry: String,
+}
+
 /// The method of obtaining the source code for a shader module
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum ShaderSource {
-    /// Shader code is loaded in dynamically from disk
+    /// Shader code is stored in a file and is loaded at runtime.
     OnDisk(String),
-    /// Shader code is embedded in the binary of the driver program
+    /// Shader code is embedded in the binary of the driver program / loaded in at compile time
     /// 
     /// Works best with `include_str!()`
     Embedded(String)
 }
 
-/// A blueprint for constructing shader modules
+/// Represents compilable shader source code
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct ShaderBlueprint {
+pub struct ShaderProgram {
     pub(crate) source: ShaderSource,
     pub(crate) hold_policy: Option<HoldPolicy>,
     pub(crate) label: String,
 }
 
-impl ShaderBlueprint {
+impl ShaderProgram {
     /// Create a shader blueprint for shader code stored on disk
     pub fn on_disk(path: impl Into<String>) -> Self {
         Self {
@@ -41,7 +51,7 @@ impl ShaderBlueprint {
         Self {
             source: ShaderSource::Embedded(source.into()),
             hold_policy: None,
-            label: "shader_from_disk".to_string()
+            label: "shader_embedded".to_string()
         }
     }
 
@@ -58,7 +68,7 @@ impl ShaderBlueprint {
     }
 }
 
-impl GpuResource for ShaderBlueprint {
+impl GpuResource for ShaderProgram {
     type Id = ShaderId;
 
     fn create_id(&self) -> Self::Id {

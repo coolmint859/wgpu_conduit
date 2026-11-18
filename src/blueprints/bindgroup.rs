@@ -3,28 +3,10 @@ use std::{hash::{DefaultHasher, Hash, Hasher}, num::NonZero};
 use async_store::HoldPolicy;
 use uuid::Uuid;
 
-use crate::{TextureHandle, context::*};
-
-/// The raw binding target for use in a `wgpu::BindGroup`
-pub(crate) enum ResolvedTarget {
-    Buffer(wgpu::Buffer),
-    Texture(TextureHandle),
-    Sampler(wgpu::Sampler),
-}
-
-impl ResolvedTarget {
-    /// Converts `self` into a `wgpu::BindingResource`
-    pub fn to_wgpu_binding(&self) -> wgpu::BindingResource<'_> {
-        match self {
-            ResolvedTarget::Buffer(buf) => buf.as_entire_binding(),
-            ResolvedTarget::Texture(tex) => wgpu::BindingResource::TextureView(&tex.view),
-            ResolvedTarget::Sampler(samp) => wgpu::BindingResource::Sampler(samp)
-        }
-    }
-}
+use crate::context::*;
 
 /// The target ID for a bind group entry
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BindingTarget {
     Buffer(BufferId),
     Texture(TextureId),
@@ -55,8 +37,31 @@ impl BindingTarget {
             BindingTarget::Sampler(id) => resources.samplers.mark_accessed(id),
         }
     }
-}
 
+    /// Returns `true` if this binding target is a buffer binding and the provided id matches the target id, `false` otherwise.
+    pub fn matches_buffer(&self, other: &BufferId) -> bool {
+        match self {
+            BindingTarget::Buffer(id) => other == id,
+            _ => false
+        }
+    }
+
+    /// Returns `true` if this binding target is a texture binding and the provided id matches the target id, `false` otherwise.
+    pub fn matches_texture(&self, other: &TextureId) -> bool {
+        match self {
+            BindingTarget::Texture(id) => other == id,
+            _ => false
+        }
+    }
+
+    /// Returns `true` if this binding target is a sampler binding and the provided id matches the target id, `false` otherwise.
+    pub fn matches_sampler(&self, other: &SamplerId) -> bool {
+        match self {
+            BindingTarget::Sampler(id) => other == id,
+            _ => false
+        }
+    }
+}
 
 /// Represents gpu resources that can be used in a bind group
 pub trait Bindable {
@@ -83,6 +88,15 @@ impl Bindable for ResourceBinding {
 pub struct GroupEntry {
     pub target: BindingTarget,
     pub slot: u32
+}
+
+impl GroupEntry {
+    /// resolves this `GroupEntry` into a `ResolvedEntry`
+    pub(crate) fn resolve(&self, resources: &GpuResources) -> Option<ResolvedEntry> {
+        self.target.resolve(resources).map(|rt| {
+            ResolvedEntry { target: rt, slot: self.slot }
+        })
+    }
 }
 
 /// A blueprint for constructing wgpu bind groups

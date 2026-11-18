@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use wgpu_conduit::{Canvas, DrawCommand, MultiBufferExecutor, PipelineBlueprint, ShaderBlueprint, ShaderProgram, blueprints::{BufferBlueprint, BufferSource, VertexBufferLayout, VertexLayout}, context::{BufferId, GpuContext, PipelineId}, execution::IndexedDraw};
+use wgpu_conduit::{Canvas, DrawCommand, MultiBufferExecutor, PipelineBlueprint, ShaderProgram, blueprints::{BufferBlueprint, BufferSource, VertexBufferLayout, VertexLayout}, context::{BufferId, GpuContext, PipelineId}, execution::IndexedDraw};
 use winit::{application::ApplicationHandler, dpi::{PhysicalSize, Size}, event::WindowEvent, event_loop::{ActiveEventLoop, ControlFlow, EventLoop}, window::{WindowAttributes, WindowId}};
 
 /// Container for the gpu context and rendering canvas
@@ -47,14 +47,14 @@ impl Triangle {
         );
 
         let shader = graphics.context.request_shader(
-            ShaderBlueprint::embedded(include_str!("shaders/2d_render.wgsl"))
+            ShaderProgram::embedded(include_str!("shaders/2d_render.wgsl"))
                 .with_label("triangle shader")
         );
 
         let pipeline = graphics.context.request_pipeline(
-            PipelineBlueprint::render(ShaderProgram { id: shader, entry: "vs_main"})
+            PipelineBlueprint::render(shader, "vs_main")
                 .with_label("triangle pipeline")
-                .with_fragment_shader(ShaderProgram { id: shader, entry: "fs_main" })
+                .with_fragment_shader(shader, "fs_main")
                 .with_color_state(graphics.canvas.surface_state(Some(wgpu::BlendState::REPLACE), wgpu::ColorWrites::ALL))
                 .with_vertex_layout::<Vertex>()
         );

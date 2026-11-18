@@ -1,23 +1,7 @@
-use std::{cell::RefCell, collections::{HashMap, HashSet}, unreachable};
+use std::{cell::RefCell, collections::{HashMap, HashSet}};
 use async_store::{HoldPolicy, ResourceHandler, Task, TaskConfig};
 
 use crate::{context::*, blueprints::*};
-
-pub enum ShaderDependency {
-    Render{
-        vertex: ResolvedShaderProgram,
-        fragment: Option<ResolvedShaderProgram>,
-    },
-    Compute {
-        shader: ResolvedShaderProgram,
-    }
-}
-
-/// The resolved dependencies of a bind group
-pub(crate) struct PipelineDependencies {
-    pub bg_layouts: Vec<wgpu::BindGroupLayout>,
-    pub shaders: ShaderDependency
-}
 
 /// Keeps track of and validates requests for render/compute pipelines
 pub(crate) struct PipelineRegistry {
@@ -54,14 +38,14 @@ impl PipelineRegistry {
     }
 
     /// Request a new shader module
-    pub fn request_shader(&mut self, blueprint: &ShaderBlueprint, global_hp: HoldPolicy) -> ShaderId {
-        let id = blueprint.create_id();
+    pub fn request_shader(&mut self, shader: &ShaderProgram, global_hp: HoldPolicy) -> ShaderId {
+        let id = shader.create_id();
 
-        let policy = blueprint.hold_policy.unwrap_or(global_hp);
+        let policy = shader.hold_policy.unwrap_or(global_hp);
         let config = TaskConfig::new(policy);
 
         let gpu = self.gpu.clone();
-        let blueprint = blueprint.clone();
+        let blueprint = shader.clone();
 
         self.shader_handles.request(id.clone(), Task::io_bound(config, async move {
             gpu.create_shader_module(&blueprint)
@@ -76,13 +60,13 @@ impl PipelineRegistry {
         self.shader_handles.sync();
 
         let pending_bgs = std::mem::take(&mut self.deferred);
-        for (id, pip_def) in &pending_bgs {
-            self.try_request(id, pip_def.clone(), bgs, global_hp);
+        for (id, blueprint) in pending_bgs {
+            self.try_request(&id, blueprint, bgs, global_hp);
         }
     }
 
     /// Remove a bind group from the registry
-    pub fn remove(&mut self, pip_id: &PipelineId, bgs: &mut BindGroupRegistry) {
+    pub fn remove_pipeline(&mut self, pip_id: &PipelineId, bgs: &mut BindGroupRegistry) {
         if let Some(blueprint) = self.pip_bps.remove(pip_id) {
             for layout_id in blueprint.bg_layouts().iter() {
                 bgs.check_dec_bgl(layout_id);
@@ -91,25 +75,44 @@ impl PipelineRegistry {
 
         self.pip_handles.remove(pip_id);
         self.deferred.remove(pip_id);
-        self.invalidate(pip_id);
+        self.valid_pips.borrow_mut().remove(pip_id);
+    }
+
+    /// Remove a shader from the pipeline registry.
+    /// 
+    /// This also invalidates all pipelines that used the shader.
+    pub fn remove_shader(&mut self, shader_id: &ShaderId) {
+        self.shader_handles.remove(shader_id);
+
+        let mut invalid_pips = HashSet::new();
+        for (pip_id, pip_bp) in &self.pip_bps {
+            if pip_bp.contains_shader(shader_id) {
+                invalid_pips.insert(*pip_id);
+            }
+        }
+
+        for pip_id in &invalid_pips {
+            self.valid_pips.borrow_mut().remove(pip_id);
+        }
     }
 
     /// Validates and returns a pipeline handle corresponding to the id if it passes
-    pub fn validate(&self, pip_id: &PipelineId, bgs: &BindGroupRegistry) -> Option<&PipelineHandle> {
+    pub fn get_pipeline(&self, pip_id: &PipelineId, bgs: &BindGroupRegistry) -> Option<&PipelineHandle> {
         if self.valid_pips.borrow().contains(pip_id) {
             return self.pip_handles.get(pip_id);
         }
 
-        let blueprint = self.pip_bps.get(pip_id)?;
-        self.resolve_dependencies(blueprint, bgs)?;
+        match self.pip_bps.get(pip_id)? {
+            Pipeline::Render(render_bp) => {
+                self.resolve_render_deps(render_bp, bgs)?;
+            }
+            Pipeline::Compute(compute_bp) => {
+                self.resolve_compute_deps(compute_bp, bgs)?;
+            }
+        }
 
         self.valid_pips.borrow_mut().insert(*pip_id);
         self.pip_handles.get(pip_id)
-    }
-
-    /// Invalidate a pipeline. This prevents it from being used in subsequent gpu commands
-    pub fn invalidate(&self, pip_id: &PipelineId) {
-        self.valid_pips.borrow_mut().remove(pip_id);
     }
 
     /// Try requesting a new pipeline tied to the provided id.
@@ -120,117 +123,104 @@ impl PipelineRegistry {
         bgs: &BindGroupRegistry,
         global_hp: HoldPolicy
     ) {
-        if let Some(deps) = self.resolve_dependencies(&blueprint, bgs) {
-            self.deferred.remove(pip_id);
-
-            if !self.pip_bps.contains_key(pip_id) {
-                self.pip_bps.insert(*pip_id, blueprint.clone());
-            }
-
-            for layout_id in blueprint.bg_layouts().iter() {
-                bgs.check_inc_bgl(layout_id);
-            }
-
-            let gpu = self.gpu.clone();
-            match blueprint {
-                Pipeline::Render(pip_bp) => {
-                    let policy = pip_bp.hold_policy.unwrap_or(global_hp);
+        match &blueprint {
+            Pipeline::Render(render_bp) => {
+                if let Some(deps) = self.resolve_render_deps(render_bp, bgs) {
+                    self.pip_bps.insert(*pip_id, blueprint.clone());
+                    for layout_id in render_bp.bg_layouts.iter() {
+                        bgs.check_inc_bgl(layout_id);
+                    }
+                    
+                    let gpu = self.gpu.clone();
+                    let pip_bp = render_bp.clone();
+                    let policy = render_bp.hold_policy.unwrap_or(global_hp);
                     let task_config = TaskConfig::new(policy);
 
-                    // This is a code smell that I'm aware of. Eventually I want to refactor the pipeline and shader creation system to reduce issues like this.
-                    let (vertex_shader, fragment_shader) = match deps.shaders {
-                        ShaderDependency::Render { vertex, fragment } => {
-                            (vertex, fragment)
-                        },
-                        ShaderDependency::Compute { .. } => { unreachable!("Shouldn't have compute pipeline dependencies for a render pipeline!")}
-                    };
-
-                    let r_pip_task = Task::io_bound(task_config, async move {
-                        gpu.create_render_pipeline(
-                            pip_bp,
-                            vertex_shader,
-                            fragment_shader,
-                            deps.bg_layouts
-                        )
+                    let render_task = Task::io_bound(task_config, async move {
+                        gpu.create_render_pipeline(pip_bp, deps)
                     });
 
-                    self.pip_handles.request(*pip_id, r_pip_task);
-                },
-                Pipeline::Compute(pip_bp) => {
-                    let policy = pip_bp.hold_policy.unwrap_or(global_hp);
-                    let task_config = TaskConfig::new(policy);
-
-                    // This is a code smell that I'm aware of. Eventually I want to refactor the pipeline and shader creation system to reduce issues like this.
-                    let compute_shader = match deps.shaders {
-                        ShaderDependency::Compute { shader } => shader,
-                        ShaderDependency::Render {..} => { unreachable!("Shouldn't have render pipeline dependencies for a compute pipeline!") },
-                    };
-
-                    let c_pip_task = Task::io_bound(task_config, async move {
-                        gpu.create_compute_pipeline(
-                            pip_bp, 
-                            compute_shader,
-                            deps.bg_layouts
-                        )
-                    });
-
-                    self.pip_handles.request(*pip_id, c_pip_task);
+                    self.pip_handles.request(*pip_id, render_task);
+                } else {
+                    self.deferred.insert(*pip_id, blueprint.clone());
                 }
-            };
-        } else {
-            self.deferred.insert(*pip_id, blueprint);
+            }
+            Pipeline::Compute(compute_bp) => {
+                if let Some(deps) = self.resolve_compute_deps(compute_bp, bgs) {
+                    self.pip_bps.insert(*pip_id, blueprint.clone());
+                    for layout_id in compute_bp.bg_layouts.iter() {
+                        bgs.check_inc_bgl(layout_id);
+                    }
+
+                    let gpu = self.gpu.clone();
+                    let pip_bp = compute_bp.clone();
+                    let policy = compute_bp.hold_policy.unwrap_or(global_hp);
+                    let task_config = TaskConfig::new(policy);
+
+                    let render_task = Task::io_bound(task_config, async move {
+                        gpu.create_compute_pipeline(pip_bp, deps)
+                    });
+
+                    self.pip_handles.request(*pip_id, render_task);
+                } else {
+                    self.deferred.insert(*pip_id, blueprint);
+                }
+            }
         }
     }
 
-    /// Resolves the dependencies of a pipeline given it's `blueprint` and a `BindGroupRegistry`
-    fn resolve_dependencies(&self, blueprint: &Pipeline, bgs: &BindGroupRegistry) -> Option<PipelineDependencies> {
-        let mut bg_layouts = Vec::new();
-        for bgl_id in blueprint.bg_layouts().iter() {
-            if let Some(layout) =  bgs.layout_handles.get(bgl_id).cloned() {
-                bg_layouts.push((*layout).clone())
-            } else {
-                return None
-            }
-        }
+    /// Resolves the dependencies of a render pipeline given it's `blueprint` and a `BindGroupRegistry`
+    ///
+    /// Returns `None` if at least one dependency doesn't resolve.
+    fn resolve_render_deps(&self, blueprint: &PipelineBlueprint<Render>, bgs: &BindGroupRegistry) -> Option<RenderPipelineDependencies> {        
+        let layouts = self.resolve_layouts(&blueprint.bg_layouts, bgs)?;
 
-        match blueprint {
-            Pipeline::Render(pip) => {
-                let v_shader = pip.ty.vertex_shader;
-                let module = self.shader_handles.get(&v_shader.id)?.clone();
-                let vertex = ResolvedShaderProgram {
-                    module,
-                    entry: v_shader.entry
-                };
+        let v_shader = &blueprint.ty.vertex_shader;
+        let vertex_shader = ResolvedShaderProgram {
+            module: self.shader_handles.get(&v_shader.id)?.clone(),
+            entry: v_shader.entry.clone()
+        };
 
-                let fragment = match pip.ty.fragment_shader {
-                    Some(f_shader) => {
-                        let module = self.shader_handles.get(&f_shader.id)?.clone();
-                        Some(ResolvedShaderProgram {
-                            module,
-                            entry: f_shader.entry
-                        })
-                    },
-                    None => None,
-                };
-
-                Some(PipelineDependencies {
-                    bg_layouts,
-                    shaders: ShaderDependency::Render { vertex, fragment }
+        let fragment_shader = blueprint.ty.fragment_shader
+            .clone()
+            .map_or(None, |f_shader| {
+                Some(ResolvedShaderProgram {
+                    module: self.shader_handles.get(&f_shader.id)?.clone(),
+                    entry: f_shader.entry
                 })
-            },
-            Pipeline::Compute(pip) => {
-                let compute_shader = pip.ty.shader;
-                let module = self.shader_handles.get(&compute_shader.id)?.clone();
-                let shader = ResolvedShaderProgram {
-                    module,
-                    entry: compute_shader.entry
-                };
+            });
 
-                Some(PipelineDependencies {
-                    bg_layouts,
-                    shaders: ShaderDependency::Compute { shader }
-                })
-            }
-        }
+        Some(RenderPipelineDependencies {
+            layouts,
+            vertex_shader,
+            fragment_shader
+        })
+    }
+
+    /// Resolves the dependencies of a compute pipeline given it's `blueprint` and a `BindGroupRegistry`.
+    /// 
+    /// Returns `None` if at least one dependency doesn't resolve.
+    fn resolve_compute_deps(&self, blueprint: &PipelineBlueprint<Compute>, bgs: &BindGroupRegistry) -> Option<ComputePipelineDependencies> {
+        let layouts = self.resolve_layouts(&blueprint.bg_layouts, bgs)?;
+
+        let compute_shader = &blueprint.ty.shader;
+        let shader = ResolvedShaderProgram {
+            module: self.shader_handles.get(&compute_shader.id)?.clone(),
+            entry: compute_shader.entry.clone()
+        };
+
+        Some(ComputePipelineDependencies { layouts, shader })
+    }
+
+    /// Returns the resolved `wgpu::BindGroupLayout`s that map to the provided set of `LayoutId`s, and `None` if at least one layout doesn't resolve.
+    fn resolve_layouts(&self, layouts: &Vec<LayoutId>, bgs: &BindGroupRegistry) -> Option<Vec<wgpu::BindGroupLayout>> {
+        let resolved: Vec<_> = layouts
+            .iter()
+            .map_while(|id| {
+                Some(bgs.get_layout(id)?.clone())
+            })
+            .collect();
+
+        Some(resolved)
     }
 }

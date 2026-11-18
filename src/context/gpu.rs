@@ -4,6 +4,57 @@ use wgpu::util::DeviceExt;
 
 use crate::{context::BindGroupLayoutHandle, blueprints::*};
 
+/// The dependencies of a bind group
+pub struct BindGroupDependencies {
+    pub layout: BindGroupLayoutHandle,
+    pub entries: Vec<ResolvedEntry>,
+}
+
+/// The resolved entry in a bind group
+pub struct ResolvedEntry {
+    pub target: ResolvedTarget,
+    pub slot: u32
+}
+
+/// The raw binding target for use in a `wgpu::BindGroup`
+pub enum ResolvedTarget {
+    Buffer(wgpu::Buffer),
+    Texture(TextureHandle),
+    Sampler(wgpu::Sampler),
+}
+
+impl ResolvedTarget {
+    /// Converts `self` into a `wgpu::BindingResource`
+    pub fn to_wgpu_binding(&self) -> wgpu::BindingResource<'_> {
+        match self {
+            ResolvedTarget::Buffer(buf) => buf.as_entire_binding(),
+            ResolvedTarget::Texture(tex) => wgpu::BindingResource::TextureView(&tex.view),
+            ResolvedTarget::Sampler(samp) => wgpu::BindingResource::Sampler(samp)
+        }
+    }
+}
+
+/// The dependencies for a render pipeline
+pub struct RenderPipelineDependencies {
+    pub layouts: Vec<wgpu::BindGroupLayout>,
+    pub vertex_shader: ResolvedShaderProgram,
+    pub fragment_shader: Option<ResolvedShaderProgram>
+}
+
+/// The dependencies for a compute pipeline
+pub struct ComputePipelineDependencies {
+    pub layouts: Vec<wgpu::BindGroupLayout>,
+    pub shader: ResolvedShaderProgram
+}
+
+/// Handle to a resolved shader program (module and entry point)
+pub struct ResolvedShaderProgram {
+    /// Handle to the shader module
+    pub module: wgpu::ShaderModule,
+    /// Entry function in the shader code
+    pub entry: String,
+}
+
 /// A lightweight handle to core wgpu primitives, including the instance, adapter, device and queue.
 /// 
 /// This is the core struct used by the `GpuContext` to create resources.
@@ -122,15 +173,20 @@ impl GpuHandle {
     }
 
     /// Create a new bind group from the given configuration builder and resource map
-    pub fn create_bind_group(
-        &self,
-        blueprint: BindGroupBlueprint, 
-        entries: Vec<wgpu::BindGroupEntry<'_>>,
-        layout: BindGroupLayoutHandle,
-    ) -> Result<wgpu::BindGroup, String> {
+    pub fn create_bind_group(&self, blueprint: BindGroupBlueprint, deps: BindGroupDependencies) -> Result<wgpu::BindGroup, String> {
+        let entries: Vec<_> = deps.entries
+            .iter()
+            .map(|entry| {
+                wgpu::BindGroupEntry {
+                    binding: entry.slot,
+                    resource: entry.target.to_wgpu_binding()
+                }
+            })
+            .collect(); 
+
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some(&blueprint.label),
-            layout: &layout,
+            layout: &deps.layout,
             entries: &entries,
         });
 
@@ -140,8 +196,8 @@ impl GpuHandle {
     }
 
     /// Create a new shader module from the given `ShaderBlueprint`
-    pub fn create_shader_module(&self, blueprint: &ShaderBlueprint) -> Result<wgpu::ShaderModule, String> {
-        let shader_source = match &blueprint.source {
+    pub fn create_shader_module(&self, shader: &ShaderProgram) -> Result<wgpu::ShaderModule, String> {
+        let shader_source = match &shader.source {
             ShaderSource::OnDisk(path) => {
                 match std::fs::read_to_string(path) {
                     Ok(source) => source,
@@ -154,32 +210,23 @@ impl GpuHandle {
             ShaderSource::Embedded(source) => source.to_string()
         };
 
-        let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some(&blueprint.label),
+        let shader_module = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some(&shader.label),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&shader_source))
         });
 
-        println!("[GpuContext] Created new shader module with label '{}'", blueprint.label);
+        println!("[GpuContext] Created new shader module with label '{}'", shader.label);
 
-        Ok(shader)
+        Ok(shader_module)
     }
 
     /// Create a new render pipeline from the given configuration builder
-    pub fn create_render_pipeline(
-        &self,
-        blueprint: PipelineBlueprint<Render>,
-        vertex_shader: ResolvedShaderProgram,
-        fragment_shader: Option<ResolvedShaderProgram>,
-        bg_layouts: Vec<wgpu::BindGroupLayout>
-    ) -> Result<PipelineHandle, String> {
-        let bg_layout_refs: Vec<&wgpu::BindGroupLayout> = bg_layouts
-            .iter()
-            .map(|layout| layout)
-            .collect();
+    pub fn create_render_pipeline(&self, blueprint: PipelineBlueprint<Render>, deps: RenderPipelineDependencies) -> Result<PipelineHandle, String> {
+        let bg_layouts: Vec<_> = deps.layouts.iter().collect();
 
         let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(&format!("{}_layout", blueprint.label)),
-            bind_group_layouts: &bg_layout_refs,
+            bind_group_layouts: &bg_layouts,
             immediate_size: 0,
         });
 
@@ -188,11 +235,11 @@ impl GpuHandle {
             .map(|l| l.as_wgpu_layout())
             .collect();
 
-        let fragment_state = match &fragment_shader {
+        let fragment_state = match &deps.fragment_shader {
             Some(shader) => {
                 Some(wgpu::FragmentState {
                     module: &shader.module,
-                    entry_point: Some(shader.entry),
+                    entry_point: Some(&shader.entry),
                     compilation_options: Default::default(),
                     targets: &blueprint.ty.color_targets
                 })
@@ -204,8 +251,8 @@ impl GpuHandle {
             label: Some(&blueprint.label),
             layout: Some(&layout),
             vertex: wgpu::VertexState {
-                module: &vertex_shader.module,
-                entry_point: Some(vertex_shader.entry),
+                module: &deps.vertex_shader.module,
+                entry_point: Some(&deps.vertex_shader.entry),
                 compilation_options: Default::default(),
                 buffers: &vertex_layouts,
             },
@@ -222,29 +269,21 @@ impl GpuHandle {
         Ok(PipelineHandle::Render(pipeline))
     }
 
-    pub fn create_compute_pipeline(
-        &self, 
-        blueprint: PipelineBlueprint<Compute>,
-        shader: ResolvedShaderProgram,
-        bg_layouts: Vec<wgpu::BindGroupLayout>
-    ) -> Result<PipelineHandle, String> {
-        let bg_layout_refs: Vec<&wgpu::BindGroupLayout> = bg_layouts
-            .iter()
-            .map(|layout| layout)
-            .collect();
+    pub fn create_compute_pipeline(&self, blueprint: PipelineBlueprint<Compute>, deps: ComputePipelineDependencies) -> Result<PipelineHandle, String> {
+        let bg_layouts: Vec<_> = deps.layouts.iter().collect();
 
         let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(&format!("{} Layout", blueprint.label)),
-            bind_group_layouts: &bg_layout_refs,
+            bind_group_layouts: &bg_layouts,
             immediate_size: 0,
         });
 
         let pipeline = self.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some(&blueprint.label),
             layout: Some(&layout),
-            module: &shader.module,
-            entry_point: Some(shader.entry),
-            compilation_options: Default::default(),
+            module: &deps.shader.module,
+            entry_point: Some(&deps.shader.entry),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
             cache: None
         });
 

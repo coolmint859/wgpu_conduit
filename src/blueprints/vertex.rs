@@ -51,7 +51,13 @@ impl VertexBufferLayout {
         self.curr_offset += format.size();
     }
 
-    /// Convert the layout into it's wgpu equivelant for use in a pipeline
+    /// Get the stride in bytes of this vertex layout
+    pub fn stride(&self) -> u64 { self.curr_offset }
+
+    /// Get the number of attributes defined with this vertex layout
+    pub fn count(&self) -> u32 { self.curr_loc }
+
+    /// Converts `self` into a `wgpu::VertexBufferLayout`
     pub(crate) fn as_wgpu_layout(&self) -> wgpu::VertexBufferLayout<'_> {
         wgpu::VertexBufferLayout {
             array_stride: self.curr_offset,
@@ -59,10 +65,4 @@ impl VertexBufferLayout {
             attributes: &self.attributes
         }
     }
-
-    /// Get the stride in bytes of this vertex layout
-    pub fn stride(&self) -> u64 { self.curr_offset }
-
-    /// Get the number of attributes defined with this vertex layout
-    pub fn count(&self) -> u32 { self.curr_loc }
 }

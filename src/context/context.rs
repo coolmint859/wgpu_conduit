@@ -1,4 +1,3 @@
-use std::{collections::HashSet};
 use async_store::{ResourceHandler, Task, TaskConfig};
 
 use crate::{gpu::GpuHandle, context::*, blueprints::*};
@@ -185,8 +184,8 @@ impl GpuContext {
     /// Request a shader module to be created from the provided blueprint.
     /// 
     ///  Returns a `ShaderId` that is uniquely associated with the resultant `wgpu::ShaderModule`.
-    pub fn request_shader(&mut self, blueprint: ShaderBlueprint) -> ShaderId {
-        return self.pip_registry.request_shader(&blueprint, self.global_hp.shaders)
+    pub fn request_shader(&mut self, shader: ShaderProgram) -> ShaderId {
+        return self.pip_registry.request_shader(&shader, self.global_hp.shaders)
     }
 
     /// Request a pipeline to be created from the provided blueprint.
@@ -213,7 +212,7 @@ impl GpuContext {
 
             let update_size = offset + data.len() as u64;
             if update_size > buffer.size() {
-                return Err(format!("[GpuContext] Data payload exceeds the buffer size."));
+                return Err("Data payload exceeds the buffer size.".to_string());
             }
 
             self.gpu.queue.write_buffer(buffer, offset, data);
@@ -222,74 +221,35 @@ impl GpuContext {
         Ok(())
     }
 
-    /// Remove a texture from the context, releasing the allocation from gpu memory. This also causes any bind group that used it to become invalid.
-    pub fn remove_texture(&mut self, id: &TextureId) {
-        self.resources.textures.remove(id);
-
-        let mut invalid_bgs = HashSet::new();
-
-        for (bd_id, bg_blueprint) in &self.bg_registry.bg_blueprints {
-            for entry in &bg_blueprint.bindings {
-                if let BindingTarget::Texture(tex_id) = &entry.target {
-                    if tex_id == id {
-                        invalid_bgs.insert(bd_id.clone());
-                        continue;
-                    }
-                }
-            }
-        }
-
-        for bg_id in &invalid_bgs {
-            self.bg_registry.invalidate(bg_id);
-        }
-
-        println!("[GpuContext] Removed Texture with id '{:?}'", id);
-    }
-
-    /// Remove a buffer from the context, releasing the allocation from gpu memory. This also causes any bind group that used it to become invalid.
+    /// Remove a buffer from the context. 
+    /// 
+    /// This also invalidates any dependent bind group.
     pub fn remove_buffer(&mut self, id: &BufferId) {
         self.resources.buffers.remove(id);
-        let mut invalid_bgs = HashSet::new();
-
-        for (bd_id, bg_blueprint) in &self.bg_registry.bg_blueprints {
-            for entry in &bg_blueprint.bindings {
-                if let BindingTarget::Buffer(buf_id) = &entry.target {
-                    if buf_id == id {
-                        invalid_bgs.insert(*bd_id);
-                        continue;
-                    }
-                }
-            }
-        }
-
-        for bg_id in &invalid_bgs {
-            self.bg_registry.invalidate(bg_id);
-        }
-
-        println!("[GpuContext] Removed Buffer with label '{:?}'", id);
+        self.bg_registry.invalidate_matching_buffer(id);
     }
 
-    /// Remove a sampler from the context, releasing the allocation from gpu memory. This also causes any bind group that used it to become invalid.
+    /// Remove a texture from the context. 
+    /// 
+    /// This also invalidates any dependent bind group.
+    pub fn remove_texture(&mut self, id: &TextureId) {
+        self.resources.textures.remove(id);
+        self.bg_registry.invalidate_matching_texture(id);
+    }
+
+    /// Remove a sampler from the context. 
+    /// 
+    /// This also invalidates any dependent bind group.
     pub fn remove_sampler(&mut self, id: &SamplerId) {
         self.resources.samplers.remove(id);
-        let mut invalid_bgs = HashSet::new();
+        self.bg_registry.invalidate_matching_sampler(id);
+    }
 
-        for (bd_id, bg_blueprint) in &self.bg_registry.bg_blueprints {
-            for entry in &bg_blueprint.bindings {
-                if let BindingTarget::Sampler(samp_id) = &entry.target {
-                    if samp_id == id {
-                        invalid_bgs.insert(*bd_id);
-                        continue;
-                    }
-                }
-            }
-        }
-
-        for bg_id in &invalid_bgs {
-            self.bg_registry.invalidate(bg_id);
-        }
-
-        println!("[GpuContext] Removed Sampler with label '{:?}'", id);
+    /// Remove a shader from the context, releasing the vram allocation.
+    /// 
+    /// This also invalidates all pipelines that used the shader.
+    pub fn remove_shader(&mut self, id: &ShaderId) {
+        self.pip_registry.remove_shader(id);
     }
 
     /// Remove a bind group from the context, releasing the vram allocation.
@@ -298,8 +258,6 @@ impl GpuContext {
     /// (i.e. no other pipeline or bind group references it), then the layout is also removed.
     pub fn remove_bind_group(&mut self, bg_id: &BindGroupId) {
         self.bg_registry.remove_bg(bg_id);
-
-        println!("[GpuContext] Removed Bind Group with label '{:?}'", bg_id);
     }
 
     /// Remove a pipeline from the context, releasing the vram allocation.
@@ -307,9 +265,7 @@ impl GpuContext {
     /// This decrements the associated bind group layout's reference count. If this was the last resource that used the layout,
     /// (i.e. no other pipeline or bind group references it), then the layout is also removed.
     pub fn remove_pipeline(&mut self, id: &PipelineId) {
-        self.pip_registry.remove(id, &mut self.bg_registry);
-
-        println!("[GpuContext] Removed Pipeline with label '{:?}'", id);
+        self.pip_registry.remove_pipeline(id, &mut self.bg_registry);
     }
     
     /// Returns the raw wgpu buffer associated with the provided id, if available.
@@ -335,21 +291,21 @@ impl GpuContext {
     /// Returns a validated bind group.
     /// 
     /// You can call this prior to rendering to speed up initial gameplay frames, but note that it will only work if
-    /// the dependent resources are already ready.
+    /// the dependent resources are ready at the time of calling.
     ///
     /// Note that any changes to underlying resources will invalidate the bind group, triggering revalidation on the next usage.
     pub fn get_bind_group(&self, bg_id: &BindGroupId) -> Option<BindGroupHandle> {
-        self.bg_registry.validate(bg_id, &self.resources)
+        self.bg_registry.get_bindgroup(bg_id, &self.resources)
     }
 
     /// Returns a validated pipeline.
     /// 
     /// You can call this prior to rendering to speed up initial gameplay frames, but note that it will only work if
-    /// the dependent resources are already ready.
+    /// the dependent resources are ready at the time of calling.
     /// 
     /// Note that any changes to underlying resources will invalidate the pipeline, triggering revalidation on the next usage.
     pub fn get_pipeline(&self, pip_id: &PipelineId) -> Option<&PipelineHandle> {
-        self.pip_registry.validate(pip_id, &self.bg_registry)
+        self.pip_registry.get_pipeline(pip_id, &self.bg_registry)
     }
 
     /// Returns `true` if a buffer mapped to `buf_id` exists or is pending completion, `false` otherwise

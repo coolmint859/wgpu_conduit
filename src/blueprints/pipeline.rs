@@ -3,24 +3,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use async_store::HoldPolicy;
 use uuid::Uuid;
 
-use crate::{blueprints::{VertexBufferLayout, VertexLayout}, context::*};
-
-/// Handle to a resolved shader program (module and entry point)
-pub struct ResolvedShaderProgram {
-    /// Handle to the shader module
-    pub module: wgpu::ShaderModule,
-    /// Entry function in the shader code
-    pub entry: &'static str,
-}
-
-/// The shader program used in a pipeline.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub struct ShaderProgram {
-    /// The id to the shader module used
-    pub id: ShaderId,
-    /// Entry function in the shader code
-    pub entry: &'static str,
-}
+use crate::{ShaderInfo, blueprints::{VertexBufferLayout, VertexLayout}, context::*};
 
 /// Represents a handle to a render/compute pipeline
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,47 +14,18 @@ pub enum PipelineHandle {
 
 impl PipelineHandle {
     /// Get the render pipeline handle if this handle is the Render variant
-    pub fn to_render(&self) -> Option<wgpu::RenderPipeline> {
-        match self {
-            PipelineHandle::Render(handle) => Some(handle.clone()),
+    pub fn to_render(&self) -> Option<&wgpu::RenderPipeline> {
+        match &self {
+            PipelineHandle::Render(handle) => Some(handle),
             PipelineHandle::Compute(_) => None
         }
     }
 
     /// Get the compute pipeline handle if this handle is the Compute variant
-    pub fn to_compute(&self) -> Option<wgpu::ComputePipeline> {
-        match self {
-            PipelineHandle::Compute(handle) => Some(handle.clone()),
+    pub fn to_compute(&self) -> Option<&wgpu::ComputePipeline> {
+        match &self {
+            PipelineHandle::Compute(handle) => Some(handle),
             PipelineHandle::Render(_) => None
-        }
-    }
-}
-
-/// Specifies the pipeline depth state configuration.
-/// 
-/// Default:
-/// ```
-/// DepthState {
-///     format: wgpu::TextureFormat::Depth32Float,
-///     compare_fn: wgpu::CompareFunction::Less,
-///     write_enabled: true,
-/// }
-/// ```
-pub struct DepthState {
-    /// The format of the depth texture used.
-    pub format: wgpu::TextureFormat,
-    /// The compare function when evaulating the depth values in the depth texture.
-    pub compare_fn: wgpu::CompareFunction,
-    /// Determines whether the depth buffer can be written to.
-    pub write_enabled: bool,
-}
-
-impl Default for DepthState {
-    fn default() -> Self {
-        Self {
-            format: wgpu::TextureFormat::Depth32Float,
-            compare_fn: wgpu::CompareFunction::Less,
-            write_enabled: true,
         }
     }
 }
@@ -79,8 +33,8 @@ impl Default for DepthState {
 /// Holds configuration state for a render pipeline blueprint
 #[derive(Clone, Debug, Hash)]
 pub struct Render {
-    pub(crate) vertex_shader: ShaderProgram,
-    pub(crate) fragment_shader: Option<ShaderProgram>,
+    pub(crate) vertex_shader: ShaderInfo,
+    pub(crate) fragment_shader: Option<ShaderInfo>,
     pub(crate) vertex_layouts: Vec<VertexBufferLayout>,
     pub(crate) color_targets: Vec<Option<wgpu::ColorTargetState>>,
     pub(crate) depth_stencil: Option<wgpu::DepthStencilState>,
@@ -88,7 +42,7 @@ pub struct Render {
 }
 
 impl Render {
-    pub fn new(vertex_shader: ShaderProgram) -> Self {
+    pub fn new(vertex_shader: ShaderInfo) -> Self {
         Self {
             vertex_shader,
             fragment_shader: None,
@@ -101,20 +55,15 @@ impl Render {
 }
 
 /// Holds configurations state for a compute pipeline creation
-#[derive(Clone, Copy, Debug, Hash)]
+#[derive(Clone, Debug, Hash)]
 pub struct Compute {
-    pub shader: ShaderProgram,
+    pub shader: ShaderInfo,
 }
 
 impl Compute {
-    pub fn new(shader: ShaderProgram) -> Self {
+    pub fn new(shader: ShaderInfo) -> Self {
         Self { shader }
     }
-}
-
-pub enum PipelineShaders {
-    Render { vertex: ShaderProgram, fragment: Option<ShaderProgram> },
-    Compute(ShaderProgram)
 }
 
 /// The type of gpu pipeline. This is used internally by the context to create the underlying wgpu pipelines
@@ -127,9 +76,28 @@ pub enum Pipeline {
 impl Pipeline {
     /// Get the bind group layouts associated with the pipeline
     pub fn bg_layouts(&self) -> &Vec<LayoutId> {
-        return match self {
+        match self {
             Pipeline::Render(pip) => &pip.bg_layouts,
             Pipeline::Compute(pip) => &pip.bg_layouts,
+        }
+    }
+
+    /// Returns `true` if the pipeline contains a shader matching the id, `false` otherwise.
+    pub fn contains_shader(&self, shader_id: &ShaderId) -> bool {
+        match self {
+            Pipeline::Render(render_bp) => {
+                let vert_match = render_bp.ty.vertex_shader.id == *shader_id;
+                let frag_match = render_bp.ty.fragment_shader
+                    .as_ref()
+                    .map_or(false, |frag| {
+                        frag.id == *shader_id
+                    });
+
+                vert_match || frag_match
+            }
+            Pipeline::Compute(compute_bp) => {
+                compute_bp.ty.shader.id == *shader_id
+            }
         }
     }
 }
@@ -197,19 +165,25 @@ impl<T: Hash> GpuResource for PipelineBlueprint<T> {
 }
 
 impl PipelineBlueprint<Render> {
-    /// Create a new render pipeline.
-    pub fn render(vertex_shader: ShaderProgram) -> Self {
+    /// Create a new render pipeline with the provided vertex shader.
+    pub fn render(shader_id: ShaderId, vs_entry: impl Into<String>) -> Self {
         Self {
             label: "render_pipeline".to_string(),
             bg_layouts: Vec::new(),
             hold_policy: None,
-            ty: Render::new(vertex_shader)
+            ty: Render::new(ShaderInfo { 
+                id: shader_id, 
+                entry: vs_entry.into() 
+            })
         }
     }
 
     /// Set the fragment shader for the render pipeline.
-    pub fn with_fragment_shader(mut self, shader: ShaderProgram) -> Self {
-        self.ty.fragment_shader = Some(shader);
+    pub fn with_fragment_shader(mut self, shader_id: ShaderId, fs_entry: impl Into<String>) -> Self {
+        self.ty.fragment_shader = Some(ShaderInfo { 
+            id: shader_id, 
+            entry: fs_entry.into() 
+        });
         self
     }
 
@@ -268,7 +242,7 @@ impl PipelineBlueprint<Render> {
 
 impl PipelineBlueprint<Compute> {
     /// Create a new compute pipeline
-    pub fn compute(shader: ShaderProgram) -> Self {
+    pub fn compute(shader: ShaderInfo) -> Self {
         Self {
             label: "compute_pipeline".to_string(),
             bg_layouts: Vec::new(),

@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::context::*;
 
 /// The target ID for a bind group entry
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum BindingTarget {
     Buffer(BufferId),
     Texture(TextureId),
@@ -18,13 +18,13 @@ impl BindingTarget {
     pub(crate) fn resolve(&self, resources: &GpuResources) -> Option<ResolvedTarget> {
         match &self {
             BindingTarget::Buffer(id) => {
-                return resources.buffers.get(id).cloned().map(ResolvedTarget::Buffer);
+                resources.buffers.get(id).cloned().map(ResolvedTarget::Buffer)
             }
             BindingTarget::Texture(id) => {
-                return resources.textures.get(id).cloned().map(ResolvedTarget::Texture)
+                resources.textures.get(id).cloned().map(ResolvedTarget::Texture)
             }
             BindingTarget::Sampler(id) => {
-                return resources.samplers.get(id).cloned().map(ResolvedTarget::Sampler);
+                resources.samplers.get(id).cloned().map(ResolvedTarget::Sampler)
             }
         }
     }
@@ -38,7 +38,7 @@ impl BindingTarget {
         }
     }
 
-    /// Returns `true` if this binding target is a buffer binding and the provided id matches the target id, `false` otherwise.
+    /// Returns `true` if this binding target is a for a buffer binding and the provided id matches the target id, `false` otherwise.
     pub fn matches_buffer(&self, other: &BufferId) -> bool {
         match self {
             BindingTarget::Buffer(id) => other == id,
@@ -46,7 +46,7 @@ impl BindingTarget {
         }
     }
 
-    /// Returns `true` if this binding target is a texture binding and the provided id matches the target id, `false` otherwise.
+    /// Returns `true` if this binding target is for a texture binding and the provided id matches the target id, `false` otherwise.
     pub fn matches_texture(&self, other: &TextureId) -> bool {
         match self {
             BindingTarget::Texture(id) => other == id,
@@ -54,7 +54,7 @@ impl BindingTarget {
         }
     }
 
-    /// Returns `true` if this binding target is a sampler binding and the provided id matches the target id, `false` otherwise.
+    /// Returns `true` if this binding target is for a sampler binding and the provided id matches the target id, `false` otherwise.
     pub fn matches_sampler(&self, other: &SamplerId) -> bool {
         match self {
             BindingTarget::Sampler(id) => other == id,
@@ -65,11 +65,12 @@ impl BindingTarget {
 
 /// Represents gpu resources that can be used in a bind group
 pub trait Bindable {
-    /// Converts `self` into the concrete resource binding
+    /// Converts `self` into a `ResourceBinding`.
     fn into_binding(self) -> ResourceBinding;
 }
 
 /// Contains the binding information for a `BindGroupBlueprint` entry.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct ResourceBinding {
     /// The target resource for the bind group entry.
     pub target: BindingTarget,
@@ -84,14 +85,16 @@ impl Bindable for ResourceBinding {
 }
 
 /// A resource entry into a bind group
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct GroupEntry {
+    /// The target resource id
     pub target: BindingTarget,
+    /// The binding slot for the target resource
     pub slot: u32
 }
 
 impl GroupEntry {
-    /// resolves this `GroupEntry` into a `ResolvedEntry`
+    /// Resolves this `GroupEntry` into a `ResolvedEntry`
     pub(crate) fn resolve(&self, resources: &GpuResources) -> Option<ResolvedEntry> {
         self.target.resolve(resources).map(|rt| {
             ResolvedEntry { target: rt, slot: self.slot }
@@ -99,16 +102,25 @@ impl GroupEntry {
     }
 }
 
-/// A blueprint for constructing wgpu bind groups
-#[derive(Clone, Debug)]
+/// A blueprint for constructing a `wgpu::BindGroup`.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct BindGroupBlueprint {
+    /// The label set for the `wgpu::BindGroup` used with gpu profiling
     pub(crate) label: String,
+    /// The layout blueprint for the bind group.
+    /// 
+    /// A corresponding `wgpu::BindGroupLayout` will only be created if the id generated from the `LayoutBlueprint` has not yet been encountered by the context.
     pub(crate) layout: LayoutBlueprint,
+    /// The set of bindings for the bind group
     pub(crate) bindings: Vec<GroupEntry>,
+    /// The resource-specific hold policy for the bind group.
+    /// 
+    /// When set to `None`, the context's global policy for bind groups is used instead.
     pub(crate) hold_policy: Option<HoldPolicy>
 }
 
 impl BindGroupBlueprint {
+    /// Create a new `BindGroupBlueprint`
     pub fn new() -> Self {
         Self {
             label: "bind_group".to_string(),
@@ -124,7 +136,7 @@ impl BindGroupBlueprint {
         self
     }
 
-    /// Set the hold policy for this bind group. This overrides the global policy.
+    /// Set the hold policy for the `wgpu::BindGroup`. This overrides the global policy.
     pub fn with_hold_policy(mut self, policy: HoldPolicy) -> Self {
         self.hold_policy = Some(policy);
         self
@@ -157,15 +169,16 @@ impl GpuResource for BindGroupBlueprint {
     }
 }
 
-/// A blueprint for constucting bind group layouts. This is automatically generated by `BindGroupBlueprint`s.
+/// A blueprint for constucting a `wgpu::BindGroupLayout`. This is automatically generated by `BindGroupBlueprint`s.
 /// 
-/// Ids are generated for one based on it's contents. This ensures that the actual wpgu layout is only created once.
-#[derive(Clone, Debug, Hash)]
+/// Ids are generated based on contents. This ensures that matching `wgpu::BindGroupLayout`s are only created once.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct LayoutBlueprint {
     pub(crate) entries: Vec<wgpu::BindGroupLayoutEntry>
 }
 
 impl LayoutBlueprint {
+    /// Create a new `LayoutBlueprint`
     pub fn new() -> Self {
         Self { entries: Vec::new() }
     }
@@ -199,191 +212,201 @@ impl GpuResource for LayoutBlueprint {
     }
 }
 
-/// Options for configurating a storage texture binding
-/// 
-/// Default is `access=WriteOnly` and `format=Rgba16Float`
-#[derive(Debug, Clone, Copy)]
-pub struct StorageTextureOptions {
+/// Options for a storage texture in a `TextureBinding`
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct Storage {
+    /// The access marker for the storage texture. Default is `ReadOnly`
     pub access: wgpu::StorageTextureAccess, 
-    pub format: wgpu::TextureFormat
+    /// The format of the storage texture
+    pub format: wgpu::TextureFormat,
+    /// the view dimensions of the storage texture. Default is `D2`
+    pub dims: wgpu::TextureViewDimension,
 }
 
-impl StorageTextureOptions {
-    pub fn new(format: wgpu::TextureFormat) -> Self {
+impl From<Storage> for wgpu::BindingType {
+    fn from(value: Storage) -> Self {
+        wgpu::BindingType::StorageTexture { 
+            access: value.access, 
+            format: value.format, 
+            view_dimension: value.dims,
+        }
+    }
+}
+
+impl TextureBinding<Storage> {
+    /// Create a `TextureBinding` for use as a storage texture.
+    /// 
+    /// Note that the `wgpu::Texture` mapped to `target` must be configured with the `STORAGE_TEXTURE` usage.
+    pub fn storage(target: TextureId, format: wgpu::TextureFormat) -> Self {
         Self {
-            access: wgpu::StorageTextureAccess::WriteOnly,
-            format
+            target,
+            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+            binding_options: Storage { 
+                format, 
+                access: wgpu::StorageTextureAccess::ReadOnly, 
+                dims: wgpu::TextureViewDimension::D2
+            }
         }
     }
 
-    /// Set the shader access for the texture to read only. 
+    /// Set the shader access for the storage texture to read only. 
     /// 
     /// Texture must be annotated with `read` (wgsl) or `read_only` (glsl) in the shader
     pub fn read_only(mut self) -> Self {
-        self.access = wgpu::StorageTextureAccess::ReadOnly;
+        self.binding_options.access = wgpu::StorageTextureAccess::ReadOnly;
         self
     }
 
-    /// Set the shader access for the texture to read and write. 
+    /// Set the shader access for the storage texture to read and write. 
     /// 
     /// Texture must be annotated with `read_write` in the shader.
     pub fn read_write(mut self) -> Self {
-        self.access = wgpu::StorageTextureAccess::ReadWrite;
+        self.binding_options.access = wgpu::StorageTextureAccess::ReadWrite;
         self
     }
 
-    /// Set the shader access for the texture to atomic read write. 
+    /// Set the shader access for the storage texture to atomic read write. 
     /// 
     /// Texture must be annotated with `read_write` in the shader.
     pub fn atomic_rw(mut self) -> Self {
-        self.access = wgpu::StorageTextureAccess::Atomic;
+        self.binding_options.access = wgpu::StorageTextureAccess::Atomic;
+        self
+    }
+
+    /// Set the view dimensions of the storage texture.
+    pub fn view_dimensions(mut self, dims: wgpu::TextureViewDimension) -> Self {
+        self.binding_options.dims = dims;
         self
     }
 }
 
-impl Default for StorageTextureOptions {
-    fn default() -> Self {
-        Self {
-            access: wgpu::StorageTextureAccess::WriteOnly,
-            format: wgpu::TextureFormat::Rgba16Float
-        }
-    }
-}
-
-/// Options for how a texture is sampled in a shader. 
-/// 
-/// Default configuration is identical to `SampledTextureOptions::nonfilterable()`
-pub struct SampledTextureOptions {
+/// Options for a sampled texture in a `TextureBinding`
+pub struct Sampled {
     pub ty: wgpu::TextureSampleType,
     pub multisampled: bool,
+    pub dims: wgpu::TextureViewDimension
 }
 
-impl SampledTextureOptions {
-    /// The sampled texture is filterable - sampler returns floats.
-    pub fn filterable() -> Self {
+impl From<Sampled> for wgpu::BindingType {
+    fn from(value: Sampled) -> Self {
+        wgpu::BindingType::Texture { 
+            sample_type: value.ty, 
+            view_dimension: value.dims, 
+            multisampled: value.multisampled
+        }
+    }
+}
+
+impl Default for Sampled {
+    fn default() -> Self {
         Self {
-            ty: wgpu::TextureSampleType::Float { filterable: true },
-            multisampled: false
+            ty: wgpu::TextureSampleType::Float { filterable: false },
+            multisampled: false,
+            dims: wgpu::TextureViewDimension::D2,
+        }
+    }
+}
+
+impl TextureBinding<Sampled> {
+    /// Create a `TextureBinding` for use as a sampled texture.
+    /// 
+    /// Note that the `wgpu::Texture` mapped to `target` must be configured with the `TEXTURE_BINDING` usage (set by default).
+    pub fn sampled(target: TextureId) -> Self {
+        Self {
+            target,
+            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+            binding_options: Sampled::default()
         }
     }
 
-    /// The sampled texture is not filterable - sampler returns floats
-    pub fn nonfilterable() -> Self {
-        Self {
-            ty: wgpu::TextureSampleType::Float { filterable: false },
-            multisampled: false
-        }
+    /// Allow the texture to be filtered when sampled. Sampler returns an `f32`
+    /// 
+    /// The `wgpu::Sampler` used must be a filtering sampler (i.e. with the `Linear` filter mode).
+    pub fn filterable(mut self) -> Self {
+        self.binding_options.ty = wgpu::TextureSampleType::Float { filterable: true };
+        self
+    }
+
+    /// Disallow the texture to be filtered when sampled. Sampler returns an `f32`.
+    /// 
+    /// The `wgpu::Sampler` used must be a non-filtering sampler (i.e. with the `Nearest` filter mode).
+    pub fn non_filterable(mut self) -> Self {
+        self.binding_options.ty = wgpu::TextureSampleType::Float { filterable: false };
+        self
     }
 
     /// Sampler does depth comparisons. Paired sampler must be the `Comparison` type.
-    pub fn depth() -> Self {
-        Self {
-            ty: wgpu::TextureSampleType::Depth,
-            multisampled: false
-        }
+    pub fn depth(mut self) -> Self {
+        self.binding_options.ty = wgpu::TextureSampleType::Depth;
+        self
     }
 
     /// Sampling returns signed integers
-    pub fn s_int() -> Self {
-        Self {
-            ty: wgpu::TextureSampleType::Sint,
-            multisampled: false
-        }
+    pub fn s_int(mut self) -> Self {
+        self.binding_options.ty = wgpu::TextureSampleType::Sint;
+        self
     }
 
     /// Sampler returns unsigned integers
-    pub fn u_int() -> Self {
-        Self {
-            ty: wgpu::TextureSampleType::Uint,
-            multisampled: false
-        }
+    pub fn u_int(mut self) -> Self {
+        self.binding_options.ty = wgpu::TextureSampleType::Uint;
+        self
     }
 
-    /// Allows the texture to sampled multiple times by the shader. 
+    /// Allow the texture to be sampled multiple times.
     /// 
-    /// The sample count for the sampled texture must be greater than 1 for this to take effect.
-    pub fn with_multisampling(mut self) -> Self {
-        self.multisampled = true;
+    /// The `wgpu::Texture` sampled must have a `sample_count` greater than 1 for this to take effect.
+    /// 
+    /// You can set the `sample_count` for the texture by calling `with_sample_count()` on the `TextureBlueprint` used to construct the `wgpu::Texture`.
+    pub fn multisampled(mut self) -> Self {
+        self.binding_options.multisampled = true;
+        self
+    }
+
+    /// Set the view dimensions of the sampled texture. 
+    pub fn view_dimensions(mut self, dims: wgpu::TextureViewDimension) -> Self {
+        self.binding_options.dims = dims;
         self
     }
 }
 
-impl Default for SampledTextureOptions {
-    fn default() -> Self {
-        Self {
-            ty: wgpu::TextureSampleType::Float { filterable: false },
-            multisampled: false
-        }
-    }
-}
-
-/// Represents a texture binding in a bind group
-pub struct TextureBinding {
+/// Represents a texture binding in a `wgpu::BindGroup`.
+/// 
+/// Default visibility is `VERTEX_FRAGMENT`
+pub struct TextureBinding<T> {
+    /// The target texture to be used in the binding.
     target: TextureId,
-    ty: wgpu::BindingType,
+    /// Options for how the texture is used in the shader
+    binding_options: T,
+    /// The shader stages the texture is visible in. Default is `VERTEX_FRAGMENT`.
     visibility: wgpu::ShaderStages,
-    view_dimensions: wgpu::TextureViewDimension
 }
 
-impl TextureBinding {
-    pub fn new(target: TextureId, ty: wgpu::BindingType) -> Self {
-        Self {
-            target,
-            ty,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            view_dimensions: wgpu::TextureViewDimension::D2
-        }
+impl<T> TextureBinding<T> {
+    /// Sets the texture binding to be visible only in a vertex shader.
+    pub fn vertex_visible(mut self) -> Self {
+        self.visibility = wgpu::ShaderStages::VERTEX;
+        self
     }
-
-    /// Create a new storage texture binding
-    pub fn storage(target: TextureId, options: StorageTextureOptions) -> Self {
-        let ty = wgpu::BindingType::StorageTexture { 
-            access: options.access,
-            format: options.format, 
-            view_dimension: wgpu::TextureViewDimension::D2
-        };
-
-        TextureBinding::new(target, ty)
-    }
-
-    /// Create a new sampled texture binding
-    pub fn as_sampled(target: TextureId, options: SampledTextureOptions) -> Self {
-        let ty = wgpu::BindingType::Texture { 
-            sample_type: options.ty, 
-            multisampled: options.multisampled,
-            view_dimension: wgpu::TextureViewDimension::D2, 
-        };
-
-        TextureBinding::new(target, ty)
-    }
-
-    /// Set the view dimensions for the texture binding
-    pub fn with_view_dimensions(mut self, dim: wgpu::TextureViewDimension) -> Self {
-        match &mut self.ty {
-            wgpu::BindingType::Texture { view_dimension, .. } => {
-                *view_dimension = dim;
-            },
-            wgpu::BindingType::StorageTexture { view_dimension, ..} => {
-                *view_dimension = dim;
-            },
-            _ => {}
-        }
-        self.view_dimensions = dim;
+    
+    /// Sets the texture binding to be visible only in a fragment shader.
+    pub fn fragment_visible(mut self) -> Self {
+        self.visibility = wgpu::ShaderStages::FRAGMENT;
         self
     }
 
-    /// Set the shader stage visibility for the texture binding
-    pub fn with_visibility(mut self, visibility: wgpu::ShaderStages) -> Self {
-        self.visibility = visibility;
+    /// Sets the texture binding to be visible in a compute shader.
+    pub fn compute_visible(mut self) -> Self {
+        self.visibility |= wgpu::ShaderStages::COMPUTE;
         self
     }
 }
 
-impl Bindable for TextureBinding {
+impl<T: Into<wgpu::BindingType>> Bindable for TextureBinding<T> {
     fn into_binding(self) -> ResourceBinding {
         ResourceBinding {
             target: BindingTarget::Texture(self.target),
-            ty: self.ty,
+            ty: self.binding_options.into(),
             visibility: self.visibility
         }
     }
@@ -391,14 +414,20 @@ impl Bindable for TextureBinding {
 
 /// Represents a buffer binding and entry in a bind group
 pub struct BufferBinding {
+    /// The target buffer to be used in the binding
     target: BufferId,
+    /// The buffer binding type
     ty: wgpu::BufferBindingType,
+    /// The shader stages the buffer is visible in. Default is `VERTEX_FRAGMENT`
     visibility: wgpu::ShaderStages,
+    /// Determines if the buffer has a dynamic offset when used in a `DrawCommand`
     has_dyn_offset: bool,
+    /// Determines if the buffer binding has a minimum size and what that size is.
     min_binding_size: Option<NonZero<u64>>
 }
 
 impl BufferBinding {
+    /// Create a new buffer binding with the provided binding type.
     pub fn new(target: BufferId, ty: wgpu::BufferBindingType) -> Self {
         Self {
             target,
@@ -456,8 +485,11 @@ impl Bindable for BufferBinding {
 
 /// Represents the binding of a Sampler in a bind group
 pub struct SamplerBinding {
+    /// The target id for the sampler used in the sampler binding
     target: SamplerId,
+    /// The shader stages the sampler is visible in.
     visibility: wgpu::ShaderStages,
+    /// The binding type of the sampler
     ty: wgpu::SamplerBindingType,
 }
 

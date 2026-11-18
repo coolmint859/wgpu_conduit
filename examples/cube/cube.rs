@@ -1,4 +1,4 @@
-use wgpu_conduit::{BindGroupBlueprint, BindGroupIdPair, BufferBinding, BufferBlueprint, BufferId, BufferSource, DrawCommand, IndexedDraw, PipelineBlueprint, PipelineId, Procedural, SampledTextureOptions, SamplerBinding, SamplerBlueprint, ShaderProgram, StandardDepth, StructuredUpdate, TextureBinding, TextureBlueprint, TextureDimensions, VertexBufferLayout, VertexLayout};
+use wgpu_conduit::{BindGroupBlueprint, BindGroupIdPair, BufferBinding, BufferBlueprint, BufferId, BufferSource, DrawCommand, IndexedDraw, PipelineBlueprint, PipelineId, Procedural, SamplerBinding, SamplerBlueprint, ShaderProgram, StandardDepth, StructuredUpdate, TextureBinding, TextureBlueprint, TextureDimensions, VertexBufferLayout, VertexLayout};
 
 use crate::Graphics;
 
@@ -201,7 +201,7 @@ impl TexturedCube {
                 .with_label("cube_textured_bg")
                 .with_entry(BufferBinding::uniform(cam_id))
                 .with_entry(BufferBinding::uniform(model_mat))
-                .with_entry(TextureBinding::as_sampled(tex, SampledTextureOptions::nonfilterable()))
+                .with_entry(TextureBinding::sampled(tex))
                 .with_entry(SamplerBinding::non_filtering(samp))
         );
 

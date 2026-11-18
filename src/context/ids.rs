@@ -1,6 +1,6 @@
 use uuid::Uuid;
 
-/// Unique identifier for a buffer
+/// A unique identifier for a `wgpu::Buffer`
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] 
 pub struct BufferId(pub Uuid);
@@ -10,7 +10,7 @@ impl BufferId {
     pub const UNINIT: Self = BufferId(Uuid::nil());
 }
 
-/// Unique identifier for a texture
+/// A unique identifier for a `wgpu::Texture`
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TextureId(pub Uuid);
@@ -20,7 +20,7 @@ impl TextureId {
     pub const UNINIT: Self = TextureId(Uuid::nil());
 }
 
-/// Content-Addressable identifier for a sampler
+/// A content-addressable identifier for a `wgpu::Sampler`
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] 
 pub struct SamplerId(pub Uuid);
@@ -30,7 +30,7 @@ impl SamplerId {
     pub const UNINIT: Self = SamplerId(Uuid::nil());
 }
 
-/// Unique identifier for a bind group
+/// A unique identifier for a `wgpu::BindGroup`
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] 
 pub struct BindGroupId(pub Uuid);
@@ -40,7 +40,7 @@ impl BindGroupId {
     pub const UNINIT: Self = BindGroupId(Uuid::nil());
 }
 
-/// Content-Addressable identifier for a bind group layout
+/// A content-addressable identifier for a `wgpu::BindGroupLayout`
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] 
 pub struct LayoutId(pub Uuid);
@@ -50,7 +50,7 @@ impl LayoutId {
     pub const UNINIT: Self = LayoutId(Uuid::nil());
 }
 
-/// Unique identifiers for a bind group and associated layout
+/// Unique identifiers for a `wgpu::BindGroup` and associated `wgpu::BindGroupLayout`
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] 
 pub struct BindGroupIdPair {
     pub id: BindGroupId,
@@ -65,7 +65,7 @@ impl BindGroupIdPair {
     };
 }
 
-/// Unique identifier for a shader module
+/// A unique identifier for a `wgpu::ShaderModule`
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] 
 pub struct ShaderId(pub Uuid);
@@ -75,7 +75,7 @@ impl ShaderId {
     pub const UNINIT: Self = ShaderId(Uuid::nil());
 }
 
-/// Content-Addressable identifier for a pipeline
+/// A content-addressable identifier for a `wgpu::RenderPipeline` or `wgpu::ComputePipeline`.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] 
 pub struct PipelineId(pub Uuid);

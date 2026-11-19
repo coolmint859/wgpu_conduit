@@ -17,7 +17,7 @@ A mostly unopinionated wrapper over wgpu for real-time applications driven by th
 - Requires a `tokio` runtime.
 
 ## How to Use - Setup
-At the heart of wgpu-conduit is the `GpuContext`. This is used to track resources using an id system. You can create a context like so:
+At the heart of `wgpu-conduit` is the `GpuContext`. This is used to track resources using an id system. You can create a context like so:
 
 ```rust
 // `init_blocking()` uses pollster to block the main thread 
@@ -42,26 +42,29 @@ let canvas = Canvas::builder()
 ```
 ### Synchronization and Redraw Events
 
-The `GpuContext` creates resources through background worker threads. These threads communicate with the main thread via a MPSC channel. This channel **must be synchonized regularly**, typically once per frame or update tick. If using windowed mode, It's recommended to do this in the application handler's `about_to_wait()` method. You would also request a `winit` redraw event with the `Canvas` here as well: 
+The `GpuContext` creates resources through background worker threads. These threads communicate with the main thread via a MPSC channel. This channel **must be synchronized regularly**, typically once per frame or update tick. 
+
+If using windowed mode, It's recommended to do this in the application handler's `about_to_wait()` method. You would also request a `winit` redraw event with the `Canvas` here as well. Luckily, this is very simple to do: 
 
 ```rust
 context.sync()
 canvas.request_redraw()
 ```
+That's it! Once you ensure you're calling `sync()` regularly, using the rest of the api is very straightforward.
 
-All resources are configured with a `HoldPolicy`, which determines how long the resources stay alive for (Also known as TTL, or time-to-live). The `GpuContext` can be configured with a `GlobalHoldPolicy`, which is `Indefinite` by default for all resources. `Indefinite` just means the resource never expires. The global policy for any specific resource can be overriden with it's blueprint.
+### TLL and Hold Policies
+
+All resources are configured with a `HoldPolicy`, which determines how long the resources stay alive for (Also known as TTL, or time-to-live). The `GpuContext` can be configured with a `GlobalHoldPolicy`, which is `Indefinite` by default for all resources. `Indefinite` just means the resource never expires. The global policy for any specific resource can be overridden with it's blueprint.
 
 Hold policies only take effect once the resource is ready to use at the next call to `sync()`.
-
-That's it! Once you ensure you're calling `sync()` regularly, using the rest of the api is very straightforward.
 
 ## Drawing a Triangle
 The "Hello, World" of graphics programming is widely considered to be drawing a triangle. So it's fitting that this would be the example for using `wgpu_conduit` in windowed mode. First, we need to create the gpu resources. Doing so is very straightforward.
 
 ### Creating Gpu Resources
-Once the `GpuContext` is created, you can request gpu resources through it by calling it's `request*()` methods. These methods immediately return lightweight, copyable ids that can be used elsewhere.
+Once the `GpuContext` is created, you can request gpu resources through it by calling it's `request_*()` methods. These methods immediately return lightweight, copyable ids that can be used elsewhere, but otherwise spawn worker threads to create the actual gpu resource.
 
-For the vertex buffer of our triangle, we also need a layout. That can be done by implementing the `VertexLayout` trait on some struct of your choice. It's recommended to implement it on the C-style struct your vertex data will live in.
+For the vertex buffer of our triangle, we also need a layout. That can be done by implementing the `VertexLayout` trait. It's recommended to implement it on the C-style struct your vertex data will live in.
 
 ```rust
 /// A vertex with a position and color attribute
@@ -77,9 +80,9 @@ impl VertexLayout for Vertex {
         // The starting location for the vertex attributes.
         let start_loc = 0;
 
-        // This is a wrapper over the `wgpu::VertexBufferLayout`
-        // that followes the builder pattern. Locations are
-        // assigned in the order the attributes are added.
+        // This is a wrapper over a `wgpu::VertexBufferLayout`. 
+        // Locations are assigned in the order the attributes
+        // are added.
         VertexBufferLayout::as_vertex_step(start_loc)
             .with_attribute(wgpu::VertexFormat::Float32x3)
             .with_attribute(wgpu::VertexFormat::Float32x3)
@@ -137,14 +140,17 @@ let view_proj = proj_matrix * view_matrix;
 // from the view-projection matrix. `writeable()` signifies this
 // buffer can be updated later, which is important for 
 // camera matrices.
+//
+// Uniform buffers are also automatically aligned up to the 
+// nearest 16 bytes as required by wgpu.
 let cam_id = context.request_buffer(
     BufferBlueprint::uniform().writeable().with_label("camera-view-proj"), 
     BufferSource::from_pod(view_proj)
 );
 
-// We can then later update the buffer during the frame loop 
-// like so. `update_buffer()` returns an error in the case 
-// the update overflows the buffer.
+// We can then later update the buffer during the frame loop. 
+// `update_buffer()` returns an error if the update would 
+// overflow the buffer.
 let _ = context.update_buffer(&cam_id, StructuredUpdate {
     data: &view_proj,
     offset: 0,

@@ -43,7 +43,7 @@ impl Triangle {
 
         let indices = graphics.context.request_buffer(
             BufferBlueprint::index(), 
-            BufferSource::from_vec(vec![0u32, 1, 2])
+            BufferSource::from_vec(vec![0u16, 1, 2])
         );
 
         let shader = graphics.context.request_shader(
@@ -69,7 +69,7 @@ impl Triangle {
     pub fn render(&self, draw_cmd: &mut DrawCommand) {
         let draw = IndexedDraw::new(self.pipeline, 0..3)
             .with_vertex_buffers(&[self.vertices])
-            .with_index_buffer(self.indices, wgpu::IndexFormat::Uint32);
+            .with_index_buffer(self.indices, wgpu::IndexFormat::Uint16);
 
         draw_cmd.add_draw(draw);
     }

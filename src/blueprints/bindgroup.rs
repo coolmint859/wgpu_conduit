@@ -282,8 +282,11 @@ impl TextureBinding<Storage> {
 
 /// Options for a sampled texture in a `TextureBinding`
 pub struct Sampled {
+    /// The specific sample type that a sampler returns when used with this texture binding. Default is an `f32` without filtering.
     pub ty: wgpu::TextureSampleType,
+    /// Determines whether the texture can be sampled more than once. Default is `false`.
     pub multisampled: bool,
+    /// The view dimensions of the sampled texture. Default is `D2`
     pub dims: wgpu::TextureViewDimension
 }
 
@@ -311,6 +314,8 @@ impl TextureBinding<Sampled> {
     /// Create a `TextureBinding` for use as a sampled texture.
     /// 
     /// Note that the `wgpu::Texture` mapped to `target` must be configured with the `TEXTURE_BINDING` usage (set by default).
+    /// 
+    /// The default sample type is `f32` without filtering. (The corresponding sampler must also be non-filtering)
     pub fn sampled(target: TextureId) -> Self {
         Self {
             target,

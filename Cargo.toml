@@ -2,6 +2,13 @@
 name = "wgpu_conduit"
 version = "0.1.0"
 edition = "2024"
+description = "A mostly unopinionated wrapper over wgpu for real-time applications driven by the main thread."
+license = "MIT"
+repository = "https://github.com/coolmint859/wgpu_conduit"
+readme = "README.md"
+keywords = ["wgpu", "webgpu", "rendering", "graphics", "gpu"]
+categories = ["rendering::graphics-apis", "rendering::rendering-engine", "rendering", "game-development"]
+
 
 [dependencies]
 winit = "0.30"

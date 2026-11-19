@@ -210,7 +210,7 @@ pub struct Nearest;
 impl SamplerBlueprint<Nearest> {
     /// Create a sampler for nearest filtering.
     /// 
-    /// Note: The anisotrophic level is locked to `1`. If you need a higher level, call `SamplerBlueprint::anisotrophic()`
+    /// Note: The anisotropy level is locked to `1`. If you need a higher level, call `SamplerBlueprint::anisotropic()`
     pub fn nearest() -> Self {
         Self {
             hold_policy: None,
@@ -240,7 +240,6 @@ impl SamplerType for SamplerBlueprint<Nearest> {
 /// Sampler type for anisotropic filtering
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct Anisotropic;
-
 impl SamplerBlueprint<Anisotropic> {
     /// Create a sampler for anisotropic filtering. Default address mode is `Repeat`
     /// 
@@ -285,7 +284,6 @@ impl SamplerType for SamplerBlueprint<Anisotropic> {
 /// Sampler type for borders around sampled texture
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct Bordered;
-
 impl SamplerBlueprint<Bordered> {
     /// Create a sampler with address mode `ClampToBorder`.
     /// 
@@ -326,7 +324,6 @@ impl SamplerType for SamplerBlueprint<Bordered> {
 /// Sampler type for comparison between values in sampled texture
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct Comparison;
-
 impl SamplerBlueprint<Comparison> {
     /// Create a sampler for value comparisons.
     pub fn comparison(func: wgpu::CompareFunction) -> Self {

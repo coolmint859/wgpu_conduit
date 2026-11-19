@@ -7,7 +7,7 @@ license = "MIT"
 repository = "https://github.com/coolmint859/wgpu_conduit"
 readme = "README.md"
 keywords = ["wgpu", "webgpu", "rendering", "graphics", "gpu"]
-categories = ["rendering::Graphics_APIs", "rendering::Rendering_engine", "rendering", "game-development"]
+categories = ["rendering", "game-development", "graphics"]
 
 
 [dependencies]

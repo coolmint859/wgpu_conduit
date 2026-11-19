@@ -20,9 +20,11 @@ A mostly unopinionated wrapper over wgpu for real-time applications driven by th
 At the heart of wgpu-conduit is the `GpuContext`. This is used to track resources using an id system. You can create a context like so:
 
 ```rust
-// `init_blocking()` uses pollster to block the main thread until the gpu is initialized.
+// `init_blocking()` uses pollster to block the main thread 
+// until the gpu is initialized.
 //
-// You can also call `init()`, which returns a future that resolves with the `GpuContext`.
+// You can also call `init()`, which returns a future that 
+// resolves with the `GpuContext`.
 let context = GpuContext::builder()
     .init_blocking()
     .expect("Failed to initialize gpu context");
@@ -31,8 +33,9 @@ let context = GpuContext::builder()
 The rendering surface and window are packaged together using a `Canvas`. This will typically live alongside the `GpuContext` inside the main application handler. You can skip this step if doing headless mode.
 
 ```rust
-// `init()` takes in a `winit` window and a reference to the `GpuContext` upon initialization.
-// This is so it can create the rendering surface the `Canvas` represents.
+// `init()` takes in a `winit` window and a reference to the
+// `GpuContext` upon initialization. This is so it can create 
+// the rendering surface the `Canvas` represents.
 let canvas = Canvas::builder()
     .init(window, &context)
     .expect("Failed to initialize rendering canvas");
@@ -74,11 +77,12 @@ impl VertexLayout for Vertex {
         // The starting location for the vertex attributes.
         let start_loc = 0;
 
-        // This is a wrapper over the `wgpu::VertexBufferLayout` that followes the builder pattern.
-        // All attribute locations will be assigned in the order the attrtibutes are added.
+        // This is a wrapper over the `wgpu::VertexBufferLayout`
+        // that followes the builder pattern. Locations are
+        // assigned in the order the attributes are added.
         VertexBufferLayout::as_vertex_step(start_loc)
-            .with_attribute(wgpu::VertexFormat::Float32x3) // position attribute - location 0
-            .with_attribute(wgpu::VertexFormat::Float32x3) // color attribute - location 1
+            .with_attribute(wgpu::VertexFormat::Float32x3)
+            .with_attribute(wgpu::VertexFormat::Float32x3)
     }
 }
 ```
@@ -86,10 +90,12 @@ impl VertexLayout for Vertex {
 You can then request the vertex and index buffers from the `GpuContext` for the triangle like so:
 
 ```rust
-// Notice how we pass in the vertex data directly. This is possible because `from_vec()` accepts any
-// Vec<T> where T implements `bytemuck::POD` and `bytemuck::Zeroable`.
+// Notice how we pass in the vertex data directly. 
+// This is possible because `from_vec()` accepts any Vec<T> 
+// where T implements `bytemuck::POD` and `bytemuck::Zeroable`.
 //
-// Note that it expects an owned Vec<T> since the data will later be sent to a worker thread.
+// Note that it expects an owned Vec<T> since the data will 
+// later be sent to a worker thread.
 let vertices = context.request_buffer(
     BufferBlueprint::vertex().with_label("triangle_vertices"), 
     BufferSource::from_vec(vec![
@@ -99,10 +105,13 @@ let vertices = context.request_buffer(
     ])
 );
 
-// Since the T value that `from_vec()` could be anything, we explicitly say that the indices are `u16`s
+// Since the T value that `from_vec()` could be anything, 
+// we explicitly say that the indices are `u16`s
 //
-// Note that wgpu requires all buffers to be aligned to 4 bytes. While only 6 bytes are declared here,
-// the index buffer is allocated with 8 bytes, where the last two bytes are 0s. This is automatic.
+// Note that wgpu requires all buffers to be aligned to 4 bytes.
+// While only 6 bytes are declared here, the index buffer is
+// allocated with 8 bytes, where the last two bytes are 0s. 
+// This is automatic.
 let indices = context.request_buffer(
     BufferBlueprint::index().with_label("triangle_indices"), 
     BufferSource::from_vec(vec![0u16, 1, 2])
@@ -113,7 +122,8 @@ For buffers that aren't created from vectors of data, which is typical for camer
 
 ```rust
 // Standard view-projection matrices using `glam` 
-// Note that `glam` is configured with the `bytemuck` feature flag in this example.
+// Note that `glam` is configured with the `bytemuck` feature 
+// flag in this example.
 let view_matrix = glam::Mat4::IDENTITY;
 let proj_matrix = glam::Mat4::perspective_rh(
     60f32.to_radians(),     // fov in radians
@@ -123,33 +133,42 @@ let proj_matrix = glam::Mat4::perspective_rh(
 );
 let view_proj = proj_matrix * view_matrix;
 
-// Here we create a uniform buffer prepopulated with data from the view-projection matrix.
-// `writeable()` signifies this buffer can be updated later, which is important for camera matrices.
+// Here we create a uniform buffer prepopulated with data 
+// from the view-projection matrix. `writeable()` signifies this
+// buffer can be updated later, which is important for 
+// camera matrices.
 let cam_id = context.request_buffer(
     BufferBlueprint::uniform().writeable().with_label("camera-view-proj"), 
     BufferSource::from_pod(view_proj)
 );
 
-/// We can then later update the buffer during the frame loop like so. 
-/// `update_buffer()` returns an error in the case the update overflows the buffer.
+// We can then later update the buffer during the frame loop 
+// like so. `update_buffer()` returns an error in the case 
+// the update overflows the buffer.
 let _ = context.update_buffer(&cam_id, StructuredUpdate {
-    data: &view_proj,       // Add the updated view-projection matrix directly!
-    offset: 0,              // Since we're updating the whole buffer, we set the offset to 0.
+    data: &view_proj,
+    offset: 0,
 })
 ```
 
 We can then create a `wgpu::BindGroup` with the camera's view-projection matrix like so:
 
 ```rust
-// `cam_bg` holds two ids: one for the `wgpu::BindGroup` and another for the `wgpu::BindGroupLayout`.
-// This allows the layout id to be used in pipelines separately from the bind group id.
+// `cam_bg` holds two ids: one for the `wgpu::BindGroup` 
+// and another for the `wgpu::BindGroupLayout`. This allows the
+// layout id to be used in pipelines separately from the 
+// bind group id.
 //
-// It's also worth noting that the layout ids are content-addressable, 
-// so only one `wgpu::BindGroupLayout` will be created for identical bind group configurations.
+// It's also worth noting that the layout ids are 
+// content-addressable, so only one `wgpu::BindGroupLayout` 
+// will be created for identical bind group configurations.
+//
+// Binding locations are assigned in the order the entries
+// are added.
 let cam_bg = context.request_bind_group(
     BindGroupBlueprint::new()
         .with_label("camera-bind-group")
-        .with_entry(BufferBinding::uniform(cam_id)) // bound to @binding(0) in the shader
+        .with_entry(BufferBinding::uniform(cam_id))
 );
 ```
 In order to render the triangle, you also need a shader and a pipeline:
@@ -157,20 +176,31 @@ In order to render the triangle, you also need a shader and a pipeline:
 ```rust
 let shader_path = "triangle_shader.wgsl";
 let shader_id = context.request_shader(
-    // `on_disk()` will load in the shader file on the same worker thread that creates the shader.
-    // You can also call `embedded()` to load in the source code at compile time.
+    // `on_disk()` will load in the shader file on the 
+    // same worker thread that creates the shader.
+    // You can also call `embedded()` to load in the source 
+    // code at compile time.
     ShaderProgram::on_disk(shader_path).with_label("triangle-shader")
 );
 
-// Render pipelines have no color target specified by default, so you need to add them yourself.
-// This enables deferred rendering setups where you might have an offscreen render pass.
+// Render pipelines have no color target specified by default, 
+// so you need to add them yourself.
+//
+// This enables deferred rendering setups where you might have 
+// an offscreen render pass.
+//
+// For on-screen render passes, you can get the surface 
+// target from the `Canvas`.
+//
+// Notice that here is also where we set the vertex layout using 
+// the `VertexLayout` trait described earlier.
 let pipeline = context.request_pipeline(
-    PipelineBlueprint::render(shader_id, "vs_main") // All render pipelines need a vertex shader
+    PipelineBlueprint::render(shader_id, "vs_main")
         .with_label("rendering-pipeline")
-        .with_bg_layouts(&[cam_bg.layout_id])       // Add the camera's bind group layout
-        .with_fragment_shader(shader_id, "fs_main") // Add the fragment shader using the same shader id
-        .with_vertex_layout::<Vertex>()             // this is where the `VertexLayout` trait is used
-        .with_color_state(canvas.surface_state(     // The canvas can be used to add a color state
+        .with_bg_layouts(&[cam_bg.layout_id])
+        .with_fragment_shader(shader_id, "fs_main")
+        .with_vertex_layout::<Vertex>()
+        .with_color_state(canvas.surface_state(
             Some(wgpu::BlendState::REPLACE),
             wgpu::ColorWrites::ALL
         ))
@@ -185,21 +215,26 @@ However, the executor will only *submit* commands if all resources used are read
 It's also worth noting that resources used in a gpu command will have their hold timers reset if not set to indefinite. This ensures that if a resource is used during execution, it stays alive for the next frame.
 
 ```rust
-/// First acquire the next frame from the canvas. This is what we use to get color attachments.
-let frame = canvas.next_frame().expect("Failed to acquire next canvas frame");
+// First acquire the next frame from the canvas. 
+// This is what we use to get color attachments.
+let frame = canvas.next_frame()
+    .expect("Failed to acquire next canvas frame");
 
-// Create a draw command using the frame, setting the clear color to black.
-// `standard_no_depth()` just means that there is only one color attachment for the surface texture
+// Create a draw command using the frame, setting the 
+// clear color to black. `standard_no_depth()` just means that
+// there is only one color attachment for the surface texture
 // and no depth attachment.
 let mut draw_cmd = DrawCommand::standard_no_depth(
     &frame, 
     Some(wgpu::Color::BLACK),
 );
 
-// Create a draw call with the vertex, index, and pipeline we created earlier for the triangle.
+// Create a draw call with the vertex, index, and pipeline 
+// we created earlier for the triangle.
 //
-// `new()` takes in the pipeline as well as the number of elements, which in our case is the 
-// number of indices.
+// `new()` takes in the pipeline as well as the number of 
+// elements, which in our case is the number of indices 
+// in the index buffer.
 let draw = IndexedDraw::new(pipeline, 0..3)
     .with_bind_groups(&[cam_bg.id])
     .with_vertex_buffers(&[vertices])
@@ -211,8 +246,10 @@ draw_cmd.add_draw(draw);
 // Finally, execute the draw command using an executor.
 //
 // Notice that it requires mutable access to a `GpuContext`. 
-// This is so it can properly ensure the resources that the `DrawCommand` requires are ready. 
-// This is also where resources used in commands are marked as accessed, resetting their hold time.
+// This is so it can properly ensure the resources that the
+// `DrawCommand` requires are ready. This is also where resources
+// used in commands are marked as accessed, resetting their 
+// hold time.
 MultiBufferExecutor::execute_draw(draw_cmd, &mut context);
 ```
 

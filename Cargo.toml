@@ -1,6 +1,6 @@
 [package]
 name = "wgpu_conduit"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "A mostly unopinionated wrapper over wgpu for real-time applications driven by the main thread."
 license = "MIT"

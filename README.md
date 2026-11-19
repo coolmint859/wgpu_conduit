@@ -249,7 +249,7 @@ let draw = IndexedDraw::new(pipeline, 0..3)
 // add the draw call to the draw command
 draw_cmd.add_draw(draw);
 
-// Finally, execute the draw command using an executor.
+// Now we execute the draw command using an executor.
 //
 // Notice that it requires mutable access to a `GpuContext`. 
 // This is so it can properly ensure the resources that the
@@ -257,6 +257,9 @@ draw_cmd.add_draw(draw);
 // used in commands are marked as accessed, resetting their 
 // hold time.
 MultiBufferExecutor::execute_draw(draw_cmd, &mut context);
+
+// Finally, present the frame to the rendering surface.
+frame.present();
 ```
 
 And now you know how to render a triangle! To see this in action, run the `triangle` example.
